@@ -101,7 +101,7 @@ class ParallelFileReader : public Reader {
   }
 
  private:
-  static constexpr size_t batch_size_ = 1 << 25;
+  static constexpr size_t batch_size_ = 1 << 27;  // 128 MiB (was 32 MiB) — fewer enqueue+lock per shard
   static ThreadPool& thread_pool();
   int fd_;
   std::string label_;

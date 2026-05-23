@@ -111,10 +111,8 @@ let cmlx = Target.target(
         // vendor docs
         "vendor-README.md",
 
-        // example code + mlx-c distributed
+        // example code only (distributed C API now enabled)
         "mlx-c/examples",
-        "mlx-c/mlx/c/distributed.cpp",
-        "mlx-c/mlx/c/distributed_group.cpp",
 
         // vendored library, include header only
         "json",
@@ -190,15 +188,13 @@ let cmlx = Target.target(
         "mlx/mlx/backend/metal/kernels",
         "mlx/mlx/backend/metal/nojit_kernels.cpp",
 
-        // do not build distributed support (yet)
+        // non-jaccl distributed backends: excluded
         "mlx/mlx/distributed/mpi/mpi.cpp",
         "mlx/mlx/distributed/ring/ring.cpp",
         "mlx/mlx/distributed/nccl/nccl.cpp",
         "mlx/mlx/distributed/nccl/nccl_stub",
-        "mlx/mlx/distributed/jaccl/jaccl.cpp",
-        "mlx/mlx/distributed/jaccl/mesh.cpp",
-        "mlx/mlx/distributed/jaccl/ring.cpp",
-        "mlx/mlx/distributed/jaccl/utils.cpp",
+        // jaccl stub excluded now that the real backend is built
+        "mlx/mlx/distributed/jaccl/no_jaccl.cpp",
     ],
     cSettings: [
         .headerSearchPath("mlx"),
@@ -226,6 +222,7 @@ let package = Package(
 
     products: [
         // main targets
+        .library(name: "Cmlx", targets: ["Cmlx"]),
         .library(name: "MLX", targets: ["MLX"]),
         .library(name: "MLXRandom", targets: ["MLXRandom"]),
         .library(name: "MLXNN", targets: ["MLXNN"]),

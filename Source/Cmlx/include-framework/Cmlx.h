@@ -11,6 +11,8 @@
 #include <Cmlx/mlx-device.h>
 #include <Cmlx/mlx-distributed-distributed.h>
 #include <Cmlx/mlx-distributed-ops.h>
+#include <Cmlx/mlx-c-distributed_group.h>
+#include <Cmlx/mlx-c-distributed.h>
 #include <Cmlx/mlx-einsum.h>
 #include <Cmlx/mlx-export.h>
 #include <Cmlx/mlx-fast.h>

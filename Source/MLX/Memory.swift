@@ -196,6 +196,31 @@ public enum Memory {
         return result
     }
 
+    /// Number of live Metal resources (buffers) the allocator is tracking.
+    ///
+    /// This is a COUNT, independent of byte usage (``activeMemory`` /
+    /// ``cacheMemory``). The Metal backend throws `[metal::malloc] Resource
+    /// limit (...) exceeded` once this reaches ``resourceLimit``. Because freed
+    /// buffers are recycled into the cache and the cache is trimmed by BYTES,
+    /// many small buffers can drive this count near the limit while byte usage
+    /// stays low. Returns 0 on non-Metal backends.
+    public static var numResources: Int {
+        var result: size_t = 0
+        mlx_get_num_resources(&result)
+        return result
+    }
+
+    /// Hard ceiling on ``numResources`` (the live Metal buffer count).
+    ///
+    /// Defaults to the `iogpu.rsrc_limit` sysctl (~499000 when unset).
+    /// Allocation throws once ``numResources`` reaches this value. Returns 0 on
+    /// non-Metal backends.
+    public static var resourceLimit: Int {
+        var result: size_t = 0
+        mlx_get_resource_limit(&result)
+        return result
+    }
+
     /// Get the peak amount of active memory in bytes.
     ///
     /// The maximum memory used is recorded from the beginning of the program

@@ -555,7 +555,14 @@ public final class MLXArray {
     /// not needed as all reads ensure the contents are evaluated.
     public func eval() {
         _ = evalLock.withLock {
-            mlx_array_eval(ctx)
+            // EvalProbe (measurement only): bracket this blocking realization too
+            // — `item()`/`asArray()`/`asData()` all funnel their lazy eval through
+            // here under the SAME `evalLock`, so a wedge on a read-path eval must
+            // also show up in the probe. Shares EvalProbe's depth counter with the
+            // free `eval(...)` functions, so nesting is counted once.
+            EvalProbe.beginEval()
+            defer { EvalProbe.endEval() }
+            return mlx_array_eval(ctx)
         }
     }
 

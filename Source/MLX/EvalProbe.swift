@@ -19,21 +19,24 @@
 // silence the isolation check and leave a real torn-read data race).
 //
 // Why a lock is safe on the hot path (and the heartbeat is never blocked by a
-// wedge): the unfair lock is held ONLY for the few nanoseconds of begin/end
-// bookkeeping — NEVER across the actual `mlx_eval` call. So when an eval wedges,
-// the probe lock is free and the heartbeat reader acquires it immediately. The
-// lock is also uncontended on writes (begin/end are serialized by `evalLock`).
-// `OSAllocatedUnfairLock` (macOS 13+/iOS 16+) is available at the package's
-// macOS 14 / iOS 17 floor; `Synchronization.Atomic` would require macOS 15.
+// wedge): the lock is held ONLY for the few nanoseconds of begin/end bookkeeping
+// — NEVER across the actual `mlx_eval` call. So when an eval wedges, the probe
+// lock is free and the heartbeat reader acquires it immediately. The lock is also
+// uncontended on writes (begin/end are serialized by `evalLock`).
+//
+// Portability: uses Foundation `NSLock` (Darwin + swift-corelibs-foundation on
+// Linux) rather than the Darwin-only `os` `OSAllocatedUnfairLock` — `EvalProbe`
+// is compiled on Linux too (it is not in Package.swift's Linux excludes), so it
+// must not import `os`. `Synchronization.Atomic` would need macOS 15 (above the
+// package's 14.0 floor). Behavior on Darwin is identical to the prior lock-box.
 //
 // PRIVACY: only durations/counters — never prompt/response content.
 
 import Foundation
-import os
 
 public enum EvalProbe {
     /// All probe state under one lock so cross-thread reads get a consistent,
-    /// non-torn snapshot. Value type ⇒ the lock box is Sendable.
+    /// non-torn snapshot.
     private struct State {
         /// Recursion depth of nested locked evals (writer-only; serialized by
         /// `evalLock`). The outermost 0→1 stamps `sinceNanos`; 1→0 clears it.
@@ -47,7 +50,18 @@ public enum EvalProbe {
         var longestMs: Int64 = 0
     }
 
-    private static let state = OSAllocatedUnfairLock(initialState: State())
+    private static let lock = NSLock()
+    // Guarded exclusively by `lock`; `nonisolated(unsafe)` because the manual
+    // lock — not the compiler's isolation checker — provides the safety.
+    nonisolated(unsafe) private static var state = State()
+
+    /// Run `body` under `lock`. Explicit lock/unlock (not `NSLock.withLock`) for
+    /// maximum portability across Foundation versions.
+    private static func withState<R>(_ body: (inout State) -> R) -> R {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&state)
+    }
 
     // MARK: - Writers (called inside evalLock, via begin / defer end)
 
@@ -56,7 +70,7 @@ public enum EvalProbe {
     /// (the one that can wedge).
     public static func beginEval() {
         let now = DispatchTime.now().uptimeNanoseconds
-        state.withLock { s in
+        withState { s in
             if s.depth == 0 { s.sinceNanos = now }
             s.depth += 1
         }
@@ -67,7 +81,7 @@ public enum EvalProbe {
     /// the signal we want. Updates `longest`/`completed` only on the outermost end.
     public static func endEval() {
         let now = DispatchTime.now().uptimeNanoseconds
-        state.withLock { s in
+        withState { s in
             s.depth -= 1
             guard s.depth <= 0 else { return }
             s.depth = 0
@@ -84,14 +98,14 @@ public enum EvalProbe {
 
     /// True while a blocking eval is executing under `evalLock`.
     public static var inFlight: Bool {
-        state.withLock { $0.sinceNanos != 0 }
+        withState { $0.sinceNanos != 0 }
     }
 
     /// How long the CURRENT eval has been running (ms), or 0 if none is in
     /// flight. A value in the seconds range is the wedge smoking gun.
     public static var currentEvalElapsedMs: Int64 {
         let now = DispatchTime.now().uptimeNanoseconds
-        return state.withLock { s in
+        return withState { s in
             guard s.sinceNanos != 0, now > s.sinceNanos else { return 0 }
             return Int64((now &- s.sinceNanos) / 1_000_000)
         }
@@ -99,12 +113,12 @@ public enum EvalProbe {
 
     /// Cumulative count of completed (returned) evals.
     public static var evalsCompleted: Int {
-        state.withLock { $0.completed }
+        withState { $0.completed }
     }
 
     /// Longest completed eval observed (ms). A wedged eval never completes, so it
     /// is captured by `currentEvalElapsedMs`, not here.
     public static var longestEvalMs: Int64 {
-        state.withLock { $0.longestMs }
+        withState { $0.longestMs }
     }
 }

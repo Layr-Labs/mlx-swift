@@ -190,7 +190,7 @@ let cmlx = Target.target(
 
         // non-jaccl distributed backends: excluded
         "mlx/mlx/distributed/mpi/mpi.cpp",
-        "mlx/mlx/distributed/ring/ring.cpp",
+        "mlx/mlx/distributed/ring/no_ring.cpp",
         "mlx/mlx/distributed/nccl/nccl.cpp",
         "mlx/mlx/distributed/nccl/nccl_stub",
         // jaccl stub excluded now that the real backend is built

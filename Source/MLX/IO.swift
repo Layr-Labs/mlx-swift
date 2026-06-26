@@ -214,7 +214,12 @@ private func new_mlx_io_vtable_dataIO() -> mlx_io_vtable {
         case SEEK_CUR:
             state.offset += Int(offset)
         case SEEK_END:
-            state.offset = state.offset - Int(offset)
+            // Position relative to the end of the buffer: end + offset
+            // (offset is typically 0 or negative). Using the buffer size here
+            // is required — e.g. load_safetensors does `seek(0, END); tell()`
+            // to size the data; the previous `state.offset - offset` left the
+            // position unchanged and reported an 8-byte "file".
+            state.offset = state.data.count + Int(offset)
         default:
             break
         }

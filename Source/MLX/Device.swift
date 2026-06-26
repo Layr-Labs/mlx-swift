@@ -28,19 +28,19 @@ public enum DeviceType: String, Hashable, Sendable {
 public final class Device: @unchecked Sendable, Equatable {
 
     let ctx: mlx_device
-    let defaultStream: Stream
+
+    /// The default stream for this device's type.
+    ///
+    /// Resolved per-thread: MLX 0.32+ default streams are thread-local, so this
+    /// must not be cached on the (shared) `Device` instance — caching the
+    /// main-thread stream would hand a non-owning worker thread a stream that
+    /// doesn't exist there ("There is no Stream(gpu, 0) in current thread").
+    var defaultStream: Stream {
+        deviceType == .cpu ? Stream.cpu : Stream.gpu
+    }
 
     init(_ ctx: mlx_device) {
         self.ctx = ctx
-
-        var deviceType = MLX_GPU
-        mlx_device_get_type(&deviceType, ctx)
-        self.defaultStream =
-            switch deviceType {
-            case MLX_CPU: .cpu
-            case MLX_GPU: .gpu
-            default: .gpu
-            }
     }
 
     public init(_ deviceType: DeviceType, index: Int32 = 0) {
@@ -52,11 +52,6 @@ public final class Device: @unchecked Sendable, Equatable {
             cDeviceType = MLX_GPU
         }
         self.ctx = mlx_device_new_type(cDeviceType, index)
-        self.defaultStream =
-            switch deviceType {
-            case .cpu: .cpu
-            case .gpu: .gpu
-            }
     }
 
     @available(*, deprecated, message: "please use defaultDevice()")

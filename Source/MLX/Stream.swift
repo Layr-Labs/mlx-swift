@@ -85,31 +85,33 @@ public final class Stream: @unchecked Sendable, Equatable {
 
     /// The default stream on the ``Device/gpu``.
     ///
-    /// MLX 0.32+ default streams are **thread-local** (a stream created on one
-    /// thread is not valid on another), so we resolve and cache one default
-    /// stream per thread. Without this, MLX ops on a non-main thread (e.g. a
-    /// `DispatchQueue` worker) crash with "There is no Stream(gpu, 0) in
-    /// current thread".
-    public static var gpu: Stream { threadLocalDefaultStream(.gpu) }
+    /// One **process-global** stream per device, created via
+    /// `mlx_thread_unsafe_*_stream_new` so its Metal command encoder lives in
+    /// MLX's GLOBAL (not thread-local) encoder map.
+    ///
+    /// MLX 0.32 made the *default* stream's command encoder thread-local
+    /// (`mlx/backend/metal/device.cpp`: `get_command_encoders()` is
+    /// `thread_local`). The moment GPU work hops threads — which Swift
+    /// async/await continuations and the provider's actor/engine do on every
+    /// request — eval can no longer find the encoder and aborts with
+    /// "There is no Stream(gpu, N) in current thread". An earlier attempt cached
+    /// the per-thread default in `Thread.threadDictionary`, but that still
+    /// breaks because the thread that *builds* the graph and the thread that
+    /// *evals* it differ across an `await`.
+    ///
+    /// A single global stream restores the MLX 0.31 single-default-stream
+    /// semantics the engine was built around. The "thread-unsafe" caveat
+    /// (no synchronization for concurrent multi-thread submission) is satisfied
+    /// because the engine serializes GPU submission (the scheduler is an actor;
+    /// the B=1 fast path runs exclusively).
+    public static var gpu: Stream { _globalGPUStream }
 
-    /// The default stream on the ``Device/cpu`` (thread-local; see ``gpu``).
-    public static var cpu: Stream { threadLocalDefaultStream(.cpu) }
+    /// The default stream on the ``Device/cpu`` (global; see ``gpu``).
+    public static var cpu: Stream { _globalCPUStream }
 
-    /// Resolve the thread-local default stream for `type`, creating + caching it
-    /// on first use on the current thread. Mirrors MLX's thread-local
-    /// `default_stream()` so the wrapping Swift `Stream` (and its `mlx_stream`
-    /// handle) stays valid for the lifetime of the thread that uses it.
-    private static func threadLocalDefaultStream(_ type: DeviceType) -> Stream {
-        let dictionary = Thread.current.threadDictionary
-        let key = type == .gpu ? "mlx.swift.defaultStream.gpu" : "mlx.swift.defaultStream.cpu"
-        if let existing = dictionary[key] as? Stream {
-            return existing
-        }
-        let stream = Stream(
-            type == .gpu ? mlx_default_gpu_stream_new() : mlx_default_cpu_stream_new())
-        dictionary[key] = stream
-        return stream
-    }
+    /// Process-global, any-thread-usable default streams (created once).
+    private static let _globalGPUStream = Stream(mlx_thread_unsafe_gpu_stream_new())
+    private static let _globalCPUStream = Stream(mlx_thread_unsafe_cpu_stream_new())
 
     @TaskLocal static var defaultStream: Stream?
 

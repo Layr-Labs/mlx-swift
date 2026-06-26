@@ -79,6 +79,16 @@ mlx_stream mlx_default_cpu_stream_new(void);
  */
 mlx_stream mlx_default_gpu_stream_new(void);
 
+/**
+ * Returns a new CPU stream usable from ANY thread (global command encoder).
+ */
+mlx_stream mlx_thread_unsafe_cpu_stream_new(void);
+
+/**
+ * Returns a new GPU stream usable from ANY thread (global command encoder).
+ */
+mlx_stream mlx_thread_unsafe_gpu_stream_new(void);
+
 /**@}*/
 
 #ifdef __cplusplus

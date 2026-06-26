@@ -271,6 +271,8 @@ let cmlx = Target.target(
         "mlx/mlx/distributed/nccl/nccl_stub",
         // jaccl stub excluded now that the real backend is built
         "mlx/mlx/distributed/jaccl/no_jaccl.cpp",
+        // jaccl sample programs each define their own main() -> exclude
+        "mlx/mlx/distributed/jaccl/lib/examples",
     ],
     cSettings: [
         .headerSearchPath("mlx"),
@@ -280,9 +282,10 @@ let cmlx = Target.target(
     cxxSettings: cxxSettings + [
         .headerSearchPath("mlx"),
         .headerSearchPath("mlx-c"),
+        .headerSearchPath("mlx/mlx/distributed/jaccl/lib"),
         .headerSearchPath("json/single_include/nlohmann"),
         .headerSearchPath("fmt/include"),
-        .define("MLX_VERSION", to: "\"0.31.1\""),
+        .define("MLX_VERSION", to: "\"0.32.0\""),
     ],
     linkerSettings: linkerSettings,
     plugins: [

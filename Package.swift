@@ -78,6 +78,21 @@ let noCudaCmlxExcludes = [
     "mlx/mlx/backend/cuda/unary",
 ]
 
+// JACCL real-backend sources. mlx builds these only on macOS with deployment
+// target >= 26.2 (mlx/mlx/distributed/jaccl/CMakeLists.txt); every other target
+// uses the no_jaccl.cpp stub. On Apple platforms the choice is made at compile
+// time by mlx-conditional/jaccl_conditional.cpp, so both the real sources and
+// the stub are excluded from direct compilation there. On Linux (mlx-conditional
+// excluded) we exclude the real sources and compile no_jaccl.cpp directly.
+let jacclRealSources = [
+    "mlx/mlx/distributed/jaccl/jaccl.cpp",
+    "mlx/mlx/distributed/jaccl/lib/jaccl/jaccl.cpp",
+    "mlx/mlx/distributed/jaccl/lib/jaccl/mesh.cpp",
+    "mlx/mlx/distributed/jaccl/lib/jaccl/rdma.cpp",
+    "mlx/mlx/distributed/jaccl/lib/jaccl/ring.cpp",
+    "mlx/mlx/distributed/jaccl/lib/jaccl/tcp.cpp",
+]
+
 #if os(Linux)
     let platformExcludes: [String]
     let cxxSettings: [CXXSetting]
@@ -113,7 +128,7 @@ let noCudaCmlxExcludes = [
                 "mlx/mlx/backend/cuda/quantized/qmm/qmm.cu",
                 "mlx/mlx/backend/cuda/quantized/qmm/qmm_impl_sm90_m128_n128_m2.cu",
                 "mlx/mlx/backend/cuda/quantized/qmm/fp_qmv.cu",
-            ] + noMetalCmlxExcludes
+            ] + jacclRealSources + noMetalCmlxExcludes
 
         cxxSettings = [
             .unsafeFlags(["-I/usr/local/cuda/include"]),
@@ -157,7 +172,7 @@ let noCudaCmlxExcludes = [
 
                 "mlx-c/mlx/c/fast.cpp",  // Exclude on Linux - calls metal_kernel unconditionally
 
-            ] + noMetalCmlxExcludes + noCudaCmlxExcludes
+            ] + jacclRealSources + noMetalCmlxExcludes + noCudaCmlxExcludes
 
         cxxSettings = []
 
@@ -191,7 +206,11 @@ let noCudaCmlxExcludes = [
             // bnns instead of simd (accelerate)
             "mlx/mlx/backend/cpu/gemms/simd_fp16.cpp",
             "mlx/mlx/backend/cpu/gemms/simd_bf16.cpp",
-        ] + noCudaCmlxExcludes
+
+            // jaccl real sources + stub: chosen at compile time by
+            // mlx-conditional/jaccl_conditional.cpp
+            "mlx/mlx/distributed/jaccl/no_jaccl.cpp",
+        ] + jacclRealSources + noCudaCmlxExcludes
 
     let cxxSettings: [CXXSetting] = [
         .headerSearchPath("metal-cpp"),
@@ -269,8 +288,11 @@ let cmlx = Target.target(
         "mlx/mlx/distributed/ring/ring.cpp",
         "mlx/mlx/distributed/nccl/nccl.cpp",
         "mlx/mlx/distributed/nccl/nccl_stub",
-        // jaccl stub excluded now that the real backend is built
-        "mlx/mlx/distributed/jaccl/no_jaccl.cpp",
+        // jaccl: the real sources vs no_jaccl.cpp stub are selected per platform
+        // in platformExcludes (Apple via mlx-conditional/jaccl_conditional.cpp;
+        // Linux compiles no_jaccl.cpp directly), so neither is excluded here.
+        // jaccl sample programs each define their own main() -> exclude
+        "mlx/mlx/distributed/jaccl/lib/examples",
     ],
     cSettings: [
         .headerSearchPath("mlx"),
@@ -280,9 +302,10 @@ let cmlx = Target.target(
     cxxSettings: cxxSettings + [
         .headerSearchPath("mlx"),
         .headerSearchPath("mlx-c"),
+        .headerSearchPath("mlx/mlx/distributed/jaccl/lib"),
         .headerSearchPath("json/single_include/nlohmann"),
         .headerSearchPath("fmt/include"),
-        .define("MLX_VERSION", to: "\"0.31.1\""),
+        .define("MLX_VERSION", to: "\"0.32.0\""),
     ],
     linkerSettings: linkerSettings,
     plugins: [

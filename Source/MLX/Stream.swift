@@ -42,14 +42,14 @@ public struct StreamOrDevice: Sendable, CustomStringConvertible, Equatable {
         StreamOrDevice(Stream.defaultStream(device))
     }
 
-    /// The ``Stream/defaultStream(_:)`` on the ``Device/cpu``
-    public static let cpu = device(.cpu)
+    /// The ``Stream/defaultStream(_:)`` on the ``Device/cpu`` (resolved per-thread)
+    public static var cpu: StreamOrDevice { device(.cpu) }
 
-    /// The ``Stream/defaultStream(_:)`` on the ``Device/gpu``
+    /// The ``Stream/defaultStream(_:)`` on the ``Device/gpu`` (resolved per-thread)
     ///
     /// ### See Also
     /// - ``GPU``
-    public static let gpu = device(.gpu)
+    public static var gpu: StreamOrDevice { device(.gpu) }
 
     public static func stream(_ stream: Stream) -> StreamOrDevice {
         StreamOrDevice(Device.defaultStream())
@@ -83,8 +83,33 @@ public final class Stream: @unchecked Sendable, Equatable {
 
     let ctx: mlx_stream
 
-    public static let gpu = Stream(mlx_default_gpu_stream_new())
-    public static let cpu = Stream(mlx_default_cpu_stream_new())
+    /// The default stream on the ``Device/gpu``.
+    ///
+    /// MLX 0.32+ default streams are **thread-local** (a stream created on one
+    /// thread is not valid on another), so we resolve and cache one default
+    /// stream per thread. Without this, MLX ops on a non-main thread (e.g. a
+    /// `DispatchQueue` worker) crash with "There is no Stream(gpu, 0) in
+    /// current thread".
+    public static var gpu: Stream { threadLocalDefaultStream(.gpu) }
+
+    /// The default stream on the ``Device/cpu`` (thread-local; see ``gpu``).
+    public static var cpu: Stream { threadLocalDefaultStream(.cpu) }
+
+    /// Resolve the thread-local default stream for `type`, creating + caching it
+    /// on first use on the current thread. Mirrors MLX's thread-local
+    /// `default_stream()` so the wrapping Swift `Stream` (and its `mlx_stream`
+    /// handle) stays valid for the lifetime of the thread that uses it.
+    private static func threadLocalDefaultStream(_ type: DeviceType) -> Stream {
+        let dictionary = Thread.current.threadDictionary
+        let key = type == .gpu ? "mlx.swift.defaultStream.gpu" : "mlx.swift.defaultStream.cpu"
+        if let existing = dictionary[key] as? Stream {
+            return existing
+        }
+        let stream = Stream(
+            type == .gpu ? mlx_default_gpu_stream_new() : mlx_default_cpu_stream_new())
+        dictionary[key] = stream
+        return stream
+    }
 
     @TaskLocal static var defaultStream: Stream?
 

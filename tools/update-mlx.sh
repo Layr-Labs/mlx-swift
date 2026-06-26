@@ -37,6 +37,7 @@ make \
     gather_front \
     gemm \
     gemm_nax \
+    gemv \
     gemv_masked \
     hadamard \
     logsumexp \
@@ -62,6 +63,7 @@ make \
     steel_gemm_gather_nax \
     steel_gemm_masked \
     steel_gemm_segmented \
+    steel_gemm_segmented_nax \
     steel_gemm_splitk \
     steel_gemm_splitk_nax \
     ternary \
@@ -69,7 +71,6 @@ make \
     unary \
     unary_ops \
     utils
-
 cd ../../..
 make cpu_compiled_preamble
 
@@ -102,4 +103,4 @@ rm Source/Cmlx/mlx-generated/*.tmp
 ./tools/fix-metal-includes.sh
 
 # prepare xcodeproj files
-./tools/update-mlx-xcodeproj.sh
+# ./tools/update-mlx-xcodeproj.sh  # skipped (not needed for swift build)

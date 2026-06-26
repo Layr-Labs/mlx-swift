@@ -84,7 +84,9 @@ class ParallelFileReader : public Reader {
   void seek(int64_t off, std::ios_base::seekdir way = std::ios_base::beg)
       override {
     if (way == std::ios_base::beg) {
-      lseek(fd_, off, 0);
+      lseek(fd_, off, SEEK_SET);
+    } else if (way == std::ios_base::end) {
+      lseek(fd_, off, SEEK_END);
     } else {
       lseek(fd_, off, SEEK_CUR);
     }
@@ -101,7 +103,7 @@ class ParallelFileReader : public Reader {
   }
 
  private:
-  static constexpr size_t batch_size_ = 1 << 27;  // 128 MiB (was 32 MiB) — fewer enqueue+lock per shard
+  static constexpr size_t batch_size_ = 1 << 25;
   static ThreadPool& thread_pool();
   int fd_;
   std::string label_;
@@ -144,7 +146,9 @@ class FileWriter : public Writer {
   void seek(int64_t off, std::ios_base::seekdir way = std::ios_base::beg)
       override {
     if (way == std::ios_base::beg) {
-      lseek(fd_, off, 0);
+      lseek(fd_, off, SEEK_SET);
+    } else if (way == std::ios_base::end) {
+      lseek(fd_, off, SEEK_END);
     } else {
       lseek(fd_, off, SEEK_CUR);
     }

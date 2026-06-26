@@ -27,6 +27,7 @@ make \
     binary \
     binary_ops \
     binary_two \
+    conv \
     copy \
     fft \
     fp_quantized \
@@ -34,6 +35,8 @@ make \
     gather \
     gather_axis \
     gather_front \
+    gemm \
+    gemm_nax \
     gemv \
     gemv_masked \
     hadamard \
@@ -42,6 +45,7 @@ make \
     quantized \
     quantized_nax \
     quantized_utils \
+    reduce \
     reduce_utils \
     scan \
     scatter \

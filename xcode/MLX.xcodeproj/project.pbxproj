@@ -1154,6 +1154,7 @@
 				"mlx-allocator.h",
 				"mlx-api.h",
 				"mlx-array.h",
+				"mlx-backend-common-gemma4_expert_qmm.h",
 				"mlx-backend-common-utils.h",
 				"mlx-backend-cpu-encoder.h",
 				"mlx-backend-cuda-cuda.h",

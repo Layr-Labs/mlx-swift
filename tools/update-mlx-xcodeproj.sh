@@ -32,6 +32,16 @@ cat > Source/Cmlx/include-framework/Cmlx.h <<EOF
 #include <Cmlx/mlx-c-fast.h>
 
 EOF
+# This header exposes an Apple C diagnostics ABI as well as C++ classifier
+# internals, so unlike the transitively-reachable C++ headers below it must not
+# be hidden wholesale behind __cplusplus.
+x=backend/common/gemma4_expert_qmm.h
+h=mlx-`echo $x | tr / -`
+d=Source/Cmlx/include-framework/$h
+cat Source/Cmlx/mlx/mlx/$x | sed -e 's:backend/:backend-:g' -e 's:cuda/:cuda-:g' -e 's:gpu/:gpu-:g' -e 's:metal/:metal-:g' -e 's:distributed/:distributed-:g' -e 's:types/:types-:' -e 's:io/:io-:' -e 's:common/:common-:' -e 's:cpu/:cpu-:' -e 's:#include "mlx/:#include <Cmlx/mlx-:g' -e 's:#include ":#include <Cmlx/mlx-:g' -e 's:.h":.h>:g' -e 's:Metal/Metal.hpp:Cmlx/Metal.hpp:g' > $d
+echo "#include <Cmlx/$h>" >> Source/Cmlx/include-framework/Cmlx.h
+echo "" >> Source/Cmlx/include-framework/Cmlx.h
+
 
 # c++ headers for xcodeproj -- these are transitively reachable
 # from mlx/mlx/mlx.h

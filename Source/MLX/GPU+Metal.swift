@@ -265,12 +265,13 @@ public enum GPU {
         public let fallbackAssignmentCount: UInt64
         public let fallbackGeometry: UInt64
         public let fallbackMetallibUnavailable: UInt64
+        public let fallbackSortednessRetracted: UInt64
 
         /// Sum of all mutually exclusive fallback reasons.
         public var fallbacks: UInt64 {
             fallbackNAX + fallbackOuterRoute + fallbackQuantization
                 + fallbackTopology + fallbackAssignmentCount + fallbackGeometry
-                + fallbackMetallibUnavailable
+                + fallbackMetallibUnavailable + fallbackSortednessRetracted
         }
 
         fileprivate init(_ value: mlx_metal_gemma4_expert_qmm_diagnostics) {
@@ -287,6 +288,7 @@ public enum GPU {
             fallbackAssignmentCount = value.fallback_assignment_count
             fallbackGeometry = value.fallback_geometry
             fallbackMetallibUnavailable = value.fallback_metallib_unavailable
+            fallbackSortednessRetracted = value.fallback_sortedness_retracted
         }
     }
 

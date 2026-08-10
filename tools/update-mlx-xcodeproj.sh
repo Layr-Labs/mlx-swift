@@ -58,6 +58,13 @@ EOF
     sed -i .tmp -e '/^#include <Cmlx\/mlx-api.h>$/r '"$mlx_api_fallback_block" $d
     rm -f $d.tmp $mlx_api_fallback_block
 fi
+# Post-condition: the generated header must carry exactly one MLX_API guard.
+# Zero means the guarded attach above failed; more than one means the
+# canonical header grew its own guard and the attach has duplicated it.
+if [[ $(grep -c '^#ifndef MLX_API$' $d) -ne 1 ]]; then
+    echo "update-mlx-xcodeproj.sh: expected exactly one '#ifndef MLX_API' line in $d" >&2
+    exit 1
+fi
 echo "#include <Cmlx/$h>" >> Source/Cmlx/include-framework/Cmlx.h
 echo "" >> Source/Cmlx/include-framework/Cmlx.h
 

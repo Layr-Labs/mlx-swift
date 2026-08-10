@@ -39,6 +39,25 @@ x=backend/common/gemma4_expert_qmm.h
 h=mlx-`echo $x | tr / -`
 d=Source/Cmlx/include-framework/$h
 cat Source/Cmlx/mlx/mlx/$x | sed -e 's:backend/:backend-:g' -e 's:cuda/:cuda-:g' -e 's:gpu/:gpu-:g' -e 's:metal/:metal-:g' -e 's:distributed/:distributed-:g' -e 's:types/:types-:' -e 's:io/:io-:' -e 's:common/:common-:' -e 's:cpu/:cpu-:' -e 's:#include "mlx/:#include <Cmlx/mlx-:g' -e 's:#include ":#include <Cmlx/mlx-:g' -e 's:.h":.h>:g' -e 's:Metal/Metal.hpp:Cmlx/Metal.hpp:g' > $d
+# This header is regenerated wholesale above, so re-attach the hand-maintained
+# C-mode MLX_API fallback: `mlx-api.h` defines MLX_API only under
+# __cplusplus, but the extern-C declarations in this header are also parsed by
+# C consumers of the Cmlx Clang module. Idempotent: skip when already present
+# (e.g. if the canonical header ever carries the fallback itself).
+if ! grep -q '^#ifndef MLX_API$' $d; then
+    mlx_api_fallback_block=$(mktemp)
+    cat > $mlx_api_fallback_block <<'EOF'
+
+// `mlx-api.h` only defines MLX_API under `__cplusplus`; the extern-C block
+// below is also parsed in C mode (Swift / Objective-C consumers of the Cmlx
+// Clang module), where the macro would otherwise be an unknown type name.
+#ifndef MLX_API
+#define MLX_API
+#endif
+EOF
+    sed -i .tmp -e '/^#include <Cmlx\/mlx-api.h>$/r '"$mlx_api_fallback_block" $d
+    rm -f $d.tmp $mlx_api_fallback_block
+fi
 echo "#include <Cmlx/$h>" >> Source/Cmlx/include-framework/Cmlx.h
 echo "" >> Source/Cmlx/include-framework/Cmlx.h
 

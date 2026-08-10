@@ -3,6 +3,7 @@
 #ifndef MLX_GEMMA4_EXPERT_QMM_H
 #define MLX_GEMMA4_EXPERT_QMM_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #if defined(__APPLE__)
@@ -36,6 +37,30 @@ void mlx_metal_gemma4_expert_qmm_diagnostics_snapshot_and_disarm(
 #ifdef __cplusplus
 }
 #endif
+
+// ABI drift pins. The layout is 4 x uint8 at offsets 0-3, 4 bytes of
+// alignment padding, then 8-aligned uint64 counters; the Swift
+// GPU.Gemma4ExpertQMMDiagnostics mapping and the Cmlx C++ facade mirror both
+// depend on these exact values.
+_Static_assert(
+    sizeof(mlx_metal_gemma4_expert_qmm_diagnostics) == 80,
+    "mlx_metal_gemma4_expert_qmm_diagnostics ABI drift: expected 80 bytes");
+_Static_assert(
+    offsetof(mlx_metal_gemma4_expert_qmm_diagnostics, armed) == 3,
+    "mlx_metal_gemma4_expert_qmm_diagnostics.armed offset drift: expected 3");
+_Static_assert(
+    offsetof(mlx_metal_gemma4_expert_qmm_diagnostics, attempts) == 8,
+    "mlx_metal_gemma4_expert_qmm_diagnostics.attempts offset drift: expected 8");
+_Static_assert(
+    offsetof(mlx_metal_gemma4_expert_qmm_diagnostics, hits) == 16,
+    "mlx_metal_gemma4_expert_qmm_diagnostics.hits offset drift: expected 16");
+_Static_assert(
+    offsetof(
+        mlx_metal_gemma4_expert_qmm_diagnostics,
+        fallback_metallib_unavailable) == 72,
+    "mlx_metal_gemma4_expert_qmm_diagnostics.fallback_metallib_unavailable "
+    "offset drift: expected 72");
+
 #endif
 
 #endif

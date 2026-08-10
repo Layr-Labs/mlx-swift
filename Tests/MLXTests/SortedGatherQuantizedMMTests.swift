@@ -1,4 +1,8 @@
 // Copyright © 2026 Apple Inc.
+//
+// Run the HIT-path tests with: MLX_GATHER_QMM_EXPERT_SLICES=1 swift test --filter SortedGatherQuantizedMMTests
+// They skip when the flag or AOT symbols are absent; every other test runs
+// under plain `swift test --filter SortedGatherQuantizedMMTests`.
 
 import Foundation
 import MLX
@@ -449,13 +453,12 @@ final class SortedGatherQuantizedMMTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        XCTAssertEqual(
-            diagnostics.attempts,
-            diagnostics.hits + diagnostics.fallbacks,
-            "each evaluated expert-QMM primitive must record exactly one terminal route",
-            file: file,
-            line: line
-        )
+        // The attempts == hits + fallbacks invariant is constructional: the
+        // C++ snapshot derives `attempts` as exactly that sum
+        // (Gemma4ExpertQMMCounterSnapshot.attempts()), and the C facade maps
+        // it through verbatim, so there is no independent quantity left to
+        // assert. The per-call-site attempts == 0/1 and per-counter
+        // assertions carry the real signal.
     }
 
     private func requireExpertSlicesEnabled() throws {

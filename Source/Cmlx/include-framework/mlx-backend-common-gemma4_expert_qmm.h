@@ -6,6 +6,13 @@
 
 #include <Cmlx/mlx-api.h>
 
+// `mlx-api.h` only defines MLX_API under `__cplusplus`; the extern-C block
+// below is also parsed in C mode (Swift / Objective-C consumers of the Cmlx
+// Clang module), where the macro would otherwise be an unknown type name.
+#ifndef MLX_API
+#define MLX_API
+#endif
+
 #if defined(__APPLE__)
 #ifdef __cplusplus
 extern "C" {

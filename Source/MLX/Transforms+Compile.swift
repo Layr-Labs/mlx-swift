@@ -37,8 +37,14 @@ final class CompiledFunction: @unchecked (Sendable) {
     }
 
     func call(_ arguments: [MLXArray]) -> [MLXArray] {
-        lock.withLock {
-            innerCall(arguments)
+        // Every compiled call eventually enters MLX under the process-global
+        // eval lock. Take it before the per-function lock so an outer compile
+        // trace can safely call a nested compiled function while another
+        // thread is evaluating that same function.
+        evalLock.withLock {
+            lock.withLock {
+                innerCall(arguments)
+            }
         }
     }
 
@@ -84,14 +90,12 @@ final class CompiledFunction: @unchecked (Sendable) {
         let innerClosure = new_mlx_closure(inner(tracers:))
         defer { mlx_closure_free(innerClosure) }
 
-        // note: this will use the cached compile (via the id)
-        // but will be able to re-evaluate with fresh state if needed
-        evalLock.lock()
+        // This runs under evalLock (acquired before the per-function lock in
+        // call()) so nested compiled functions preserve one global lock order.
         var compiled = mlx_closure_new()
         let compileStatus = mlx_detail_compile(&compiled, innerClosure, id, shapeless, [], 0)
         defer {
             mlx_closure_free(compiled)
-            evalLock.unlock()
         }
 
         // mlx_error was already dispatched on failure:

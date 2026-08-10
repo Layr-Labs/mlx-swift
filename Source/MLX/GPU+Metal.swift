@@ -245,4 +245,82 @@ public enum GPU {
                 memorySize: memSize)
         }
     }
+
+    /// Runtime state for the opt-in Gemma 4 sorted expert-QMM specialization.
+    ///
+    /// Route counters change only while diagnostics are explicitly armed. The
+    /// feature request and immutable runtime capabilities remain observable
+    /// while diagnostics are unarmed.
+    public struct Gemma4ExpertQMMDiagnostics: Equatable, Sendable {
+        public let requested: Bool
+        public let aotAvailable: Bool
+        public let naxAvailable: Bool
+        public let armed: Bool
+        public let attempts: UInt64
+        public let hits: UInt64
+        public let fallbackNAX: UInt64
+        public let fallbackOuterRoute: UInt64
+        public let fallbackQuantization: UInt64
+        public let fallbackTopology: UInt64
+        public let fallbackAssignmentCount: UInt64
+        public let fallbackGeometry: UInt64
+        public let fallbackMetallibUnavailable: UInt64
+        public let fallbackSortednessRetracted: UInt64
+
+        /// Sum of all mutually exclusive fallback reasons.
+        public var fallbacks: UInt64 {
+            fallbackNAX + fallbackOuterRoute + fallbackQuantization
+                + fallbackTopology + fallbackAssignmentCount + fallbackGeometry
+                + fallbackMetallibUnavailable + fallbackSortednessRetracted
+        }
+
+        fileprivate init(_ value: mlx_metal_gemma4_expert_qmm_diagnostics) {
+            requested = value.requested != 0
+            aotAvailable = value.aot_available != 0
+            naxAvailable = value.nax_available != 0
+            armed = value.armed != 0
+            attempts = value.attempts
+            hits = value.hits
+            fallbackNAX = value.fallback_nax
+            fallbackOuterRoute = value.fallback_outer_route
+            fallbackQuantization = value.fallback_quantization
+            fallbackTopology = value.fallback_topology
+            fallbackAssignmentCount = value.fallback_assignment_count
+            fallbackGeometry = value.fallback_geometry
+            fallbackMetallibUnavailable = value.fallback_metallib_unavailable
+            fallbackSortednessRetracted = value.fallback_sortedness_retracted
+        }
+    }
+
+    /// Snapshot Gemma 4 expert-QMM feature, AOT capability, and route counters
+    /// without changing the armed state.
+    public static func gemma4ExpertQMMDiagnostics() -> Gemma4ExpertQMMDiagnostics {
+        var value = mlx_metal_gemma4_expert_qmm_diagnostics()
+        mlx_metal_gemma4_expert_qmm_diagnostics_snapshot(&value)
+        return Gemma4ExpertQMMDiagnostics(value)
+    }
+
+    /// Clear the route counters without changing the armed state.
+    public static func resetGemma4ExpertQMMDiagnostics() {
+        mlx_metal_gemma4_expert_qmm_diagnostics_reset()
+    }
+
+    /// Clear the route counters and arm accounting for a measured interval.
+    /// Call only at an engine-idle boundary after warmup has completed.
+    public static func clearAndArmGemma4ExpertQMMDiagnostics() {
+        mlx_metal_gemma4_expert_qmm_diagnostics_clear_and_arm()
+    }
+
+    /// Snapshot the measured interval and disarm route accounting. Call only
+    /// at an engine-idle boundary after measured work has completed.
+    /// The returned `armed` value reports whether accounting was armed before
+    /// this call.
+    public static func snapshotAndDisarmGemma4ExpertQMMDiagnostics()
+        -> Gemma4ExpertQMMDiagnostics
+    {
+        var value = mlx_metal_gemma4_expert_qmm_diagnostics()
+        mlx_metal_gemma4_expert_qmm_diagnostics_snapshot_and_disarm(&value)
+        return Gemma4ExpertQMMDiagnostics(value)
+    }
+
 }

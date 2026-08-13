@@ -80,12 +80,17 @@ mlx_stream mlx_default_cpu_stream_new(void);
 mlx_stream mlx_default_gpu_stream_new(void);
 
 /**
- * Returns a new CPU stream usable from ANY thread (global command encoder).
+ * Returns a new CPU stream usable from ANY thread.
+ *
+ * Unlike the per-thread default stream, this stream's command encoder is
+ * registered globally (mlx::core::new_thread_unsafe_stream), so it stays valid
+ * when work hops threads (e.g. Swift async/await continuations). The caller is
+ * responsible for not submitting to it concurrently from multiple threads.
  */
 mlx_stream mlx_thread_unsafe_cpu_stream_new(void);
 
 /**
- * Returns a new GPU stream usable from ANY thread (global command encoder).
+ * Returns a new GPU stream usable from ANY thread (see the CPU variant).
  */
 mlx_stream mlx_thread_unsafe_gpu_stream_new(void);
 

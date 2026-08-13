@@ -228,6 +228,284 @@ final class SortedGatherQuantizedMMTests: XCTestCase {
         Memory.clearCache()
     }
 
+    /// Activates the Qwen 3.5/3.6 E=256 specializations exactly: fused
+    /// gate_up [256,1024,2048], split gate/up [256,512,2048], and down
+    /// [256,2048,512] at affine 4-bit/group-64 bfloat16 across the
+    /// allowlisted prefill assignment counts (T x top-8, T in {512, 1024,
+    /// 2048}). Patterns cover aligned tiles, multi-boundary unaligned tiles,
+    /// empty experts with heavy skew, and maximal fragmentation (255 one-row
+    /// experts).
+    func testQwenSortedAffineGatherQuantizedMMExpertSlices() throws {
+        try requireExpertSlicesEnabled()
+        let qwenExpertCount = 256
+        let geometries: [(name: String, k: Int, n: Int)] = [
+            ("fused gate_up K2048 N1024", 2048, 1024),
+            ("split gate/up K2048 N512", 2048, 512),
+            ("down K512 N2048", 512, 2048),
+        ]
+
+        var unaligned4096 = Array(repeating: 16, count: qwenExpertCount)
+        unaligned4096.replaceSubrange(0 ..< 4, with: [3, 4, 5, 52])
+
+        var emptyExperts8192 = Array(repeating: 0, count: qwenExpertCount)
+        emptyExperts8192[0] = 5
+        emptyExperts8192[2] = 2
+        emptyExperts8192[4] = 17
+        emptyExperts8192[5] = 1
+        emptyExperts8192[qwenExpertCount - 1] = 8167
+
+        let maximallyFragmented16384 =
+            Array(repeating: 1, count: qwenExpertCount - 1) + [16129]
+        let cases: [(name: String, expertCounts: [Int])] = [
+            ("M4096, BM16 top-8 uniform", Array(repeating: 16, count: qwenExpertCount)),
+            ("M4096, multi-boundary unaligned tiles", unaligned4096),
+            ("M8192, empty experts and heavy skew", emptyExperts8192),
+            ("M16384, maximally fragmented expert boundaries", maximallyFragmented16384),
+        ]
+
+        for geometry in geometries {
+            let fixture = gemmaAffineFixture(
+                expertCount: qwenExpertCount,
+                inputDimensions: geometry.k,
+                outputDimensions: geometry.n
+            )
+            for testCase in cases {
+                let expertIndices = sortedExpertIndices(testCase.expertCounts)
+                let rowCount = expertIndices.count
+                XCTAssertTrue([4096, 8192, 16384].contains(rowCount))
+                let rhsIndices = MLXArray(expertIndices).asType(.uint32)
+                let x = ones([rowCount, 1, geometry.k], dtype: .bfloat16)
+
+                GPU.clearAndArmGemma4ExpertQMMDiagnostics()
+                let actualSorted = gatherQuantizedMM(
+                    x,
+                    fixture.weights,
+                    scales: fixture.scales,
+                    biases: fixture.biases,
+                    rhsIndices: rhsIndices,
+                    transpose: true,
+                    groupSize: groupSize,
+                    bits: bits,
+                    mode: .affine,
+                    sortedIndices: true
+                )
+                let expected = broadcast(
+                    take(fixture.expertOutputs, rhsIndices).reshaped([rowCount, 1, 1]),
+                    to: [rowCount, 1, geometry.n]
+                )
+
+                eval(actualSorted, expected)
+                let context = "\(geometry.name): \(testCase.name)"
+                XCTAssertEqual(actualSorted.shape, expected.shape, context)
+                XCTAssertTrue(
+                    actualSorted.allClose(expected, rtol: 1e-3, atol: 1e-3).item(Bool.self),
+                    "sorted gather-QMM selected incorrect expert rows for \(context); "
+                        + "max absolute error "
+                        + "\((actualSorted - expected).abs().max().item(Float.self))"
+                )
+                assertExactGemmaRoute(
+                    GPU.snapshotAndDisarmGemma4ExpertQMMDiagnostics(), context)
+                Memory.clearCache()
+            }
+        }
+    }
+
+    /// Random-tensor equivalence at the exact Qwen shapes: the tile route's
+    /// output must match both the legacy unsorted gather-QMM and the
+    /// dequantized gatherMM reference within FP32-accumulation tolerances.
+    func testQwenSortedGatherQuantizedMMMatchesLegacyOnRandomTensors() throws {
+        try requireExpertSlicesEnabled()
+        let qwenExpertCount = 256
+        let geometries: [(name: String, k: Int, n: Int)] = [
+            ("fused gate_up K2048 N1024", 2048, 1024),
+            ("down K512 N2048", 512, 2048),
+        ]
+        for geometry in geometries {
+            let weights = deterministicValues(
+                count: qwenExpertCount * geometry.n * geometry.k,
+                multiplier: 17,
+                modulus: 127
+            ).reshaped([qwenExpertCount, geometry.n, geometry.k]).asType(.bfloat16)
+            let (quantizedWeights, scales, biases) = quantized(
+                weights, groupSize: groupSize, bits: bits, mode: .affine)
+            let dequantizedWeights = dequantized(
+                quantizedWeights,
+                scales: scales,
+                biases: biases,
+                groupSize: groupSize,
+                bits: bits,
+                mode: .affine,
+                dtype: .bfloat16
+            ).swappedAxes(-1, -2)
+
+            var expertCounts = Array(repeating: 16, count: qwenExpertCount)
+            expertCounts.replaceSubrange(0 ..< 4, with: [1, 15, 33, 15])
+            let expertIndices = sortedExpertIndices(expertCounts)
+            let rowCount = expertIndices.count
+            XCTAssertEqual(rowCount, 4096)
+            let rhsIndices = MLXArray(expertIndices).asType(.uint32)
+            let x = deterministicValues(
+                count: rowCount * geometry.k,
+                multiplier: 29,
+                modulus: 113
+            ).reshaped([rowCount, 1, geometry.k]).asType(.bfloat16)
+
+            GPU.clearAndArmGemma4ExpertQMMDiagnostics()
+            let actualSorted = gatherQuantizedMM(
+                x,
+                quantizedWeights,
+                scales: scales,
+                biases: biases,
+                rhsIndices: rhsIndices,
+                transpose: true,
+                groupSize: groupSize,
+                bits: bits,
+                mode: .affine,
+                sortedIndices: true
+            )
+            let route = GPU.snapshotAndDisarmGemma4ExpertQMMDiagnostics()
+            let expectedQuantized = gatherQuantizedMM(
+                x,
+                quantizedWeights,
+                scales: scales,
+                biases: biases,
+                rhsIndices: rhsIndices,
+                transpose: true,
+                groupSize: groupSize,
+                bits: bits,
+                mode: .affine,
+                sortedIndices: false
+            )
+            let expectedDequantized = gatherMM(
+                x, dequantizedWeights, rhsIndices: rhsIndices, sortedIndices: false)
+
+            eval(actualSorted, expectedQuantized, expectedDequantized)
+            assertExactGemmaRoute(route, geometry.name)
+            XCTAssertTrue(
+                actualSorted.allClose(expectedQuantized, rtol: 1e-2, atol: 1e-2)
+                    .item(Bool.self),
+                "tile route and legacy gather-QMM differ for \(geometry.name); "
+                    + "max absolute error "
+                    + "\((actualSorted - expectedQuantized).abs().max().item(Float.self))"
+            )
+            XCTAssertTrue(
+                actualSorted.allClose(expectedDequantized, rtol: 2e-2, atol: 2e-2)
+                    .item(Bool.self),
+                "tile route drifted from dequantized reference for \(geometry.name); "
+                    + "max absolute error "
+                    + "\((actualSorted - expectedDequantized).abs().max().item(Float.self))"
+            )
+            Memory.clearCache()
+        }
+    }
+
+    /// Mis-sorted indices under the sorted contract must retract on-device
+    /// and re-route to the order-agnostic legacy kernel with a correct
+    /// result.
+    func testQwenSortednessViolationRetractsToLegacyRoute() throws {
+        try requireExpertSlicesEnabled()
+        let diagnosticsProbe = GPU.gemma4ExpertQMMDiagnostics()
+        try XCTSkipUnless(
+            diagnosticsProbe.aotAvailable && !diagnosticsProbe.naxAvailable,
+            "retract coverage requires the AOT tile kernels on a non-NAX device")
+        let qwenExpertCount = 256
+        let k = 512
+        let n = 2048
+        let fixture = gemmaAffineFixture(
+            expertCount: qwenExpertCount,
+            inputDimensions: k,
+            outputDimensions: n
+        )
+        var expertIndices = sortedExpertIndices(
+            Array(repeating: 16, count: qwenExpertCount))
+        // One inversion in the middle breaks global monotonicity.
+        expertIndices.swapAt(2048, 2049 + 16)
+        let rowCount = expertIndices.count
+        let rhsIndices = MLXArray(expertIndices).asType(.uint32)
+        let x = ones([rowCount, 1, k], dtype: .bfloat16)
+
+        GPU.clearAndArmGemma4ExpertQMMDiagnostics()
+        let actual = gatherQuantizedMM(
+            x,
+            fixture.weights,
+            scales: fixture.scales,
+            biases: fixture.biases,
+            rhsIndices: rhsIndices,
+            transpose: true,
+            groupSize: groupSize,
+            bits: bits,
+            mode: .affine,
+            sortedIndices: true
+        )
+        let expected = broadcast(
+            take(fixture.expertOutputs, rhsIndices).reshaped([rowCount, 1, 1]),
+            to: [rowCount, 1, n]
+        )
+        eval(actual, expected)
+        XCTAssertTrue(
+            actual.allClose(expected, rtol: 1e-3, atol: 1e-3).item(Bool.self),
+            "retracted call must still produce the legacy-path result; "
+                + "max absolute error "
+                + "\((actual - expected).abs().max().item(Float.self))"
+        )
+        let diagnostics = GPU.snapshotAndDisarmGemma4ExpertQMMDiagnostics()
+        XCTAssertEqual(diagnostics.attempts, 1)
+        XCTAssertEqual(diagnostics.hits, 0)
+        XCTAssertEqual(diagnostics.fallbackSortednessRetracted, 1)
+        Memory.clearCache()
+    }
+
+    /// T=128 chunks (1024 assignments) intentionally stay on the legacy
+    /// implementation for Qwen shapes.
+    func testQwenSelectorRejectsNonAllowlistedAssignmentCount() {
+        let qwenExpertCount = 256
+        let rowCount = 1024
+        let k = 512
+        let n = 2048
+        let fixture = gemmaAffineFixture(
+            expertCount: qwenExpertCount,
+            inputDimensions: k,
+            outputDimensions: n
+        )
+        let expertCounts = Array(repeating: 4, count: qwenExpertCount)
+        let rhsIndices = MLXArray(sortedExpertIndices(expertCounts)).asType(.uint32)
+        let x = ones([rowCount, 1, k], dtype: .bfloat16)
+
+        GPU.clearAndArmGemma4ExpertQMMDiagnostics()
+        let actual = gatherQuantizedMM(
+            x,
+            fixture.weights,
+            scales: fixture.scales,
+            biases: fixture.biases,
+            rhsIndices: rhsIndices,
+            transpose: true,
+            groupSize: groupSize,
+            bits: bits,
+            mode: .affine,
+            sortedIndices: true
+        )
+        let expected = broadcast(
+            take(fixture.expertOutputs, rhsIndices).reshaped([rowCount, 1, 1]),
+            to: [rowCount, 1, n]
+        )
+
+        eval(actual, expected)
+        XCTAssertTrue(actual.allClose(expected, rtol: 1e-3, atol: 1e-3).item(Bool.self))
+        let diagnostics = GPU.snapshotAndDisarmGemma4ExpertQMMDiagnostics()
+        XCTAssertTrue(diagnostics.armed)
+        assertCounterInvariant(diagnostics)
+        if !diagnostics.requested {
+            XCTAssertEqual(diagnostics.attempts, 0)
+        } else if diagnostics.naxAvailable {
+            XCTAssertEqual(diagnostics.fallbackNAX, 1)
+            XCTAssertEqual(diagnostics.hits, 0)
+        } else {
+            XCTAssertEqual(diagnostics.fallbackAssignmentCount, 1)
+            XCTAssertEqual(diagnostics.hits, 0)
+        }
+        Memory.clearCache()
+    }
+
     /// Protects the established fallback BM=16 schedule on compact shapes.
     func testSortedAffineGatherQuantizedMMFallbackExpertBoundaries() {
         let weights = deterministicValues(

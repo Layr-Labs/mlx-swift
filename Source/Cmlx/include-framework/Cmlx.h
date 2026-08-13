@@ -2,6 +2,7 @@
 #include <Cmlx/mlx-c-transforms_impl.h>
 #include <Cmlx/mlx-c-linalg.h>
 #include <Cmlx/mlx-c-fast.h>
+
 #include <Cmlx/mlx-backend-common-gemma4_expert_qmm.h>
 
 #include <Cmlx/mlx-api.h>

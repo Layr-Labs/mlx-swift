@@ -363,6 +363,9 @@ final class SortedGatherQuantizedMMTests: XCTestCase {
                 mode: .affine,
                 sortedIndices: true
             )
+            // Force the routed gather to actually execute while diagnostics
+            // are armed: MLX is lazy, so the snapshot must come after eval.
+            eval(actualSorted)
             let route = GPU.snapshotAndDisarmGemma4ExpertQMMDiagnostics()
             let expectedQuantized = gatherQuantizedMM(
                 x,
@@ -381,16 +384,26 @@ final class SortedGatherQuantizedMMTests: XCTestCase {
 
             eval(actualSorted, expectedQuantized, expectedDequantized)
             assertExactGemmaRoute(route, geometry.name)
+            // Outputs are bf16 with |y| up to ~15 for K=2048 dots of these
+            // deterministic inputs; one bf16 ulp at that magnitude is
+            // 2^-8 * 16 = 0.0625. Different (but both FP32-accumulated)
+            // tile orders legitimately differ by a few output ulps, so the
+            // absolute tolerance is ulp-scaled from the reference itself;
+            // a wrong expert row would err at the full |y| scale (~10+).
+            let referenceScale = expectedQuantized.abs().max().item(Float.self)
+            let ulpTolerance = max(1e-2, 4 * referenceScale / 256)
             XCTAssertTrue(
-                actualSorted.allClose(expectedQuantized, rtol: 1e-2, atol: 1e-2)
-                    .item(Bool.self),
+                actualSorted.allClose(
+                    expectedQuantized, rtol: 2e-2, atol: Double(ulpTolerance)
+                ).item(Bool.self),
                 "tile route and legacy gather-QMM differ for \(geometry.name); "
                     + "max absolute error "
                     + "\((actualSorted - expectedQuantized).abs().max().item(Float.self))"
             )
             XCTAssertTrue(
-                actualSorted.allClose(expectedDequantized, rtol: 2e-2, atol: 2e-2)
-                    .item(Bool.self),
+                actualSorted.allClose(
+                    expectedDequantized, rtol: 2e-2, atol: Double(ulpTolerance)
+                ).item(Bool.self),
                 "tile route drifted from dequantized reference for \(geometry.name); "
                     + "max absolute error "
                     + "\((actualSorted - expectedDequantized).abs().max().item(Float.self))"

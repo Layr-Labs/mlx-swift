@@ -22,7 +22,7 @@ final class SortedGatherQuantizedMMTests: XCTestCase {
     }
 
     func testGemma4ExpertQMMDiagnosticsReflectProcessConfigurationAndArmState() {
-        let enabledValues = ["1", "true", "on", "yes"]
+        let enabledValues = ["1", "true", "on", "yes", "trust"]
         let requested = ProcessInfo.processInfo.environment["MLX_GATHER_QMM_EXPERT_SLICES"]?
             .lowercased()
 
@@ -421,6 +421,10 @@ final class SortedGatherQuantizedMMTests: XCTestCase {
         try XCTSkipUnless(
             diagnosticsProbe.aotAvailable && !diagnosticsProbe.naxAvailable,
             "retract coverage requires the AOT tile kernels on a non-NAX device")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["MLX_GATHER_QMM_EXPERT_SLICES"]?
+                .lowercased() == "trust",
+            "trust mode skips the sortedness-retract readback by design")
         let qwenExpertCount = 256
         let k = 512
         let n = 2048
@@ -729,13 +733,13 @@ final class SortedGatherQuantizedMMTests: XCTestCase {
         if diagnostics.naxAvailable {
             XCTAssertEqual(diagnostics.fallbackNAX, 1, context, file: file, line: line)
             XCTAssertEqual(diagnostics.hits, 0, context, file: file, line: line)
-        } else if diagnostics.aotAvailable {
+        } else {
+            // requireExpertSlicesEnabled() skips hit-path suites when the AOT
+            // symbols are absent, so anything short of a hit here is a bug —
+            // never accept the metallib-unavailable fallback as success.
+            XCTAssertTrue(diagnostics.aotAvailable, context, file: file, line: line)
             XCTAssertEqual(diagnostics.hits, 1, context, file: file, line: line)
             XCTAssertEqual(diagnostics.fallbacks, 0, context, file: file, line: line)
-        } else {
-            XCTAssertEqual(
-                diagnostics.fallbackMetallibUnavailable, 1, context, file: file, line: line)
-            XCTAssertEqual(diagnostics.hits, 0, context, file: file, line: line)
         }
     }
 
@@ -756,8 +760,16 @@ final class SortedGatherQuantizedMMTests: XCTestCase {
         let value = ProcessInfo.processInfo.environment["MLX_GATHER_QMM_EXPERT_SLICES"]?
             .lowercased()
         try XCTSkipUnless(
-            ["1", "true", "on", "yes"].contains(value ?? ""),
+            ["1", "true", "on", "yes", "trust"].contains(value ?? ""),
             "exact-shape coverage requires R1 enabled"
+        )
+        // The hit-path suites certify the AOT tile kernels; without a staged
+        // source-matched mlx.metallib they would silently exercise only the
+        // legacy implementation, so skip instead of accepting the fallback.
+        try XCTSkipUnless(
+            GPU.gemma4ExpertQMMDiagnostics().aotAvailable,
+            "hit-path coverage requires the AOT tile kernels; stage a "
+                + "source-matched mlx.metallib (scripts/fetch-metallib.sh)"
         )
     }
 

@@ -1,3 +1,4 @@
+#ifdef __cplusplus
 // Copyright © 2023-2024 Apple Inc.
 
 #pragma once
@@ -291,3 +292,4 @@ NS::SharedPtr<NS::AutoreleasePool> new_scoped_memory_pool();
 bool is_nax_available();
 
 } // namespace mlx::core::metal
+#endif

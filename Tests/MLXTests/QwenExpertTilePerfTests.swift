@@ -49,11 +49,12 @@ final class QwenExpertTilePerfTests: XCTestCase {
             ("down T1024", 512, 2048, 8192),
         ]
 
-        let requested = ["1", "true", "on", "yes"].contains(
-            ProcessInfo.processInfo.environment["MLX_GATHER_QMM_EXPERT_SLICES"]?
-                .lowercased() ?? "")
+        // The device owns the route decision (0/1/trust all parse there), so
+        // derive the A/B label from what it actually enabled rather than
+        // re-parsing MLX_GATHER_QMM_EXPERT_SLICES here.
         let diagnostics = GPU.gemma4ExpertQMMDiagnostics()
-        var header = "[qwen-expert-tile-perf] route=" + (requested ? "tile" : "legacy")
+        var header =
+            "[qwen-expert-tile-perf] route=" + (diagnostics.requested ? "tile" : "legacy")
         header += " aot=\(diagnostics.aotAvailable) nax=\(diagnostics.naxAvailable)\n"
         FileHandle.standardError.write(Data(header.utf8))
 
@@ -104,8 +105,11 @@ final class QwenExpertTilePerfTests: XCTestCase {
             let p90 = samples[(samples.count * 9) / 10]
             // Weight bytes actually streamed per call: M/E-weighted expert
             // rows are all touched (uniform histogram touches all E experts).
+            // Per output row: k/2 packed W4 bytes plus one BF16 scale and one
+            // BF16 bias per group of 64, i.e. (k / groupSize) * 4 bytes.
             let weightBytes =
-                expertCount * benchCase.n * (benchCase.k / 2 + benchCase.k / 32 * 4)
+                expertCount * benchCase.n
+                * (benchCase.k / 2 + benchCase.k / groupSize * 4)
             let gbps = Double(weightBytes) / (median / 1e3) / 1e9
             var line = "[qwen-expert-tile-perf] \(benchCase.name): "
             line += "median " + String(format: "%.4f", median) + " ms "

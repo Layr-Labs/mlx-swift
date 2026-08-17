@@ -67,11 +67,12 @@ public func RoPE(
 @_disfavoredOverload
 public func scaledDotProductAttention(
     queries: MLXArray, keys: MLXArray, values: MLXArray, scale: Float, mask: MLXArray?,
-    memoryEfficientThreshold: Int? = nil, stream: StreamOrDevice = .default
+    memoryEfficientThreshold: Int? = nil, forceFused: Bool = false,
+    stream: StreamOrDevice = .default
 ) -> MLXArray {
     return MLXFast.scaledDotProductAttention(
         queries: queries, keys: keys, values: values, scale: scale, mask: mask,
-        memoryEfficientThreshold: memoryEfficientThreshold, stream: stream)
+        memoryEfficientThreshold: memoryEfficientThreshold, forceFused: forceFused, stream: stream)
 }
 
 /// Root Mean Square normalization (RMS norm).

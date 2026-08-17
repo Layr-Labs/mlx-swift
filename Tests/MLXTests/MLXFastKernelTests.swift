@@ -152,6 +152,32 @@ class MLXFastKernelTests: XCTestCase {
         }
     }
 
+    func testFastSDPAForceFusedRejectsVmap() {
+        let attention = vmap(
+            { arrays in
+                [
+                    MLXFast.scaledDotProductAttention(
+                        queries: arrays[0], keys: arrays[1], values: arrays[2], scale: 1.0 / 8.0,
+                        mask: .none, forceFused: true)
+                ]
+            }, inAxes: [0, 0, 0], outAxes: [0])
+        let queries = MLXArray.ones([2, 1, 4, 9, 64], dtype: .float16)
+        let keys = MLXArray.ones([2, 1, 4, 9, 64], dtype: .float16)
+        let values = MLXArray.ones([2, 1, 4, 9, 64], dtype: .float16)
+
+        XCTAssertThrowsError(
+            try withError {
+                _ = attention([queries, keys, values])
+            }
+        ) { error in
+            guard case MLXError.caught(let message) = error else {
+                return XCTFail("expected MLXError, got \(error)")
+            }
+            XCTAssertTrue(message.contains("force_fused=True"), message)
+            XCTAssertTrue(message.contains("vmap"), message)
+        }
+    }
+
     func testRoPEOutput() {
         // https://github.com/ml-explore/mlx-swift/issues/315
         MLXRandom.seed(0)

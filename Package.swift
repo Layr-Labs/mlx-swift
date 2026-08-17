@@ -242,6 +242,7 @@ let cmlx = Target.target(
 
         // example code only (distributed C API now enabled)
         "mlx-c/examples",
+        "mlx-c/tests",
 
         // vendored library, include header only
         "json",
@@ -405,6 +406,10 @@ let package = Package(
             dependencies: [
                 "MLX", "MLXNN", "MLXOptimizers",
             ]
+        ),
+        .testTarget(
+            name: "MLXFastTests",
+            dependencies: ["MLX", "MLXFast"]
         ),
 
         // ------

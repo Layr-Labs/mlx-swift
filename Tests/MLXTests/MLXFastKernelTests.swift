@@ -111,6 +111,73 @@ class MLXFastKernelTests: XCTestCase {
         XCTAssertEqual(result.sum().item(Float.self), 1281.9253, accuracy: 0.01)
     }
 
+    func testFastSDPAForceFusedD256() {
+        MLXRandom.seed(7)
+        let headDimension = 256
+        let scale = 1.0 / sqrt(Float(headDimension))
+        let queries = MLXRandom.normal([1, 2, 9, headDimension]).asType(.float16)
+        let keys = MLXRandom.normal([1, 2, 17, headDimension]).asType(.float16)
+        let values = MLXRandom.normal([1, 2, 17, headDimension]).asType(.float16)
+        let reference = softmax(
+            (queries * scale).matmul(keys.transposed(0, 1, 3, 2)), axis: -1
+        ).matmul(values)
+
+        let defaultResult = MLXFast.scaledDotProductAttention(
+            queries: queries, keys: keys, values: values, scale: scale, mask: nil)
+        let forcedResult = MLXFast.scaledDotProductAttention(
+            queries: queries, keys: keys, values: values, scale: scale, mask: .none,
+            forceFused: true)
+
+        XCTAssertTrue(defaultResult.allClose(reference, rtol: 1e-2, atol: 1e-2).item(Bool.self))
+        XCTAssertTrue(forcedResult.allClose(reference, rtol: 1e-2, atol: 1e-2).item(Bool.self))
+    }
+
+    func testFastSDPAForceFusedRejectsUnsupportedD256Float32() {
+        let queries = MLXRandom.normal([1, 2, 9, 256])
+        let keys = MLXRandom.normal([1, 2, 17, 256])
+        let values = MLXRandom.normal([1, 2, 17, 256])
+
+        XCTAssertThrowsError(
+            try withError {
+                _ = MLXFast.scaledDotProductAttention(
+                    queries: queries, keys: keys, values: values, scale: 1.0 / 16.0,
+                    mask: nil, forceFused: true)
+            }
+        ) { error in
+            guard case MLXError.caught(let message) = error else {
+                return XCTFail("expected MLXError, got \(error)")
+            }
+            XCTAssertTrue(message.contains("53760 bytes"), message)
+            XCTAssertTrue(message.contains("32 KiB"), message)
+        }
+    }
+
+    func testFastSDPAForceFusedRejectsVmap() {
+        let attention = vmap(
+            { arrays in
+                [
+                    MLXFast.scaledDotProductAttention(
+                        queries: arrays[0], keys: arrays[1], values: arrays[2], scale: 1.0 / 8.0,
+                        mask: .none, forceFused: true)
+                ]
+            }, inAxes: [0, 0, 0], outAxes: [0])
+        let queries = MLXArray.ones([2, 1, 4, 9, 64], dtype: .float16)
+        let keys = MLXArray.ones([2, 1, 4, 9, 64], dtype: .float16)
+        let values = MLXArray.ones([2, 1, 4, 9, 64], dtype: .float16)
+
+        XCTAssertThrowsError(
+            try withError {
+                _ = attention([queries, keys, values])
+            }
+        ) { error in
+            guard case MLXError.caught(let message) = error else {
+                return XCTFail("expected MLXError, got \(error)")
+            }
+            XCTAssertTrue(message.contains("force_fused=True"), message)
+            XCTAssertTrue(message.contains("vmap"), message)
+        }
+    }
+
     func testRoPEOutput() {
         // https://github.com/ml-explore/mlx-swift/issues/315
         MLXRandom.seed(0)

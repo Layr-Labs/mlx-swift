@@ -120,13 +120,27 @@ public enum MLXFast {
         sinks: MLXArray? = nil,
         memoryEfficientThreshold: Int? = nil, stream: StreamOrDevice = .default
     ) -> MLXArray {
+        scaledDotProductAttention(
+            queries: queries, keys: keys, values: values, scale: scale, mask: mask, sinks: sinks,
+            memoryEfficientThreshold: memoryEfficientThreshold, forceFused: false, stream: stream)
+    }
+
+    /// Variant with an array mask that requires fused-kernel routing and reports an error when
+    /// unsupported.
+    public static func scaledDotProductAttention(
+        queries: MLXArray, keys: MLXArray, values: MLXArray, scale: Float, mask: MLXArray?,
+        sinks: MLXArray? = nil,
+        memoryEfficientThreshold: Int? = nil, forceFused: Bool,
+        stream: StreamOrDevice = .default
+    ) -> MLXArray {
         var result = mlx_array_new()
 
-        mlx_fast_scaled_dot_product_attention(
+        mlx_fast_scaled_dot_product_attention_v2(
             &result,
             queries.ctx, keys.ctx, values.ctx, scale,
             "", mask?.ctx ?? MLXArray.mlxNone.ctx,
             (sinks ?? .mlxNone).ctx,
+            forceFused,
             stream.ctx)
         return MLXArray(result)
     }
@@ -206,13 +220,28 @@ public enum MLXFast {
         sinks: MLXArray? = nil,
         stream: StreamOrDevice = .default
     ) -> MLXArray {
+        scaledDotProductAttention(
+            queries: queries, keys: keys, values: values, scale: scale, mask: mask, sinks: sinks,
+            forceFused: false, stream: stream)
+    }
+
+    /// Variant with a mask mode that requires fused-kernel routing and reports an error when
+    /// unsupported.
+    public static func scaledDotProductAttention(
+        queries: MLXArray, keys: MLXArray, values: MLXArray, scale: Float,
+        mask: ScaledDotProductAttentionMaskMode,
+        sinks: MLXArray? = nil,
+        forceFused: Bool,
+        stream: StreamOrDevice = .default
+    ) -> MLXArray {
         var result = mlx_array_new()
 
-        mlx_fast_scaled_dot_product_attention(
+        mlx_fast_scaled_dot_product_attention_v2(
             &result,
             queries.ctx, keys.ctx, values.ctx, scale,
             mask.mode, mask.mask?.ctx ?? MLXArray.mlxNone.ctx,
             (sinks ?? .mlxNone).ctx,
+            forceFused,
             stream.ctx)
         return MLXArray(result)
     }
@@ -330,7 +359,18 @@ public func scaledDotProductAttention(
 ) -> MLXArray {
     return MLXFast.scaledDotProductAttention(
         queries: queries, keys: keys, values: values, scale: scale, mask: mask,
-        memoryEfficientThreshold: memoryEfficientThreshold, stream: stream)
+        memoryEfficientThreshold: memoryEfficientThreshold, forceFused: false, stream: stream)
+}
+
+/// Variant that requires fused-kernel routing and reports an error when unsupported.
+public func scaledDotProductAttention(
+    queries: MLXArray, keys: MLXArray, values: MLXArray, scale: Float, mask: MLXArray?,
+    memoryEfficientThreshold: Int? = nil, forceFused: Bool,
+    stream: StreamOrDevice = .default
+) -> MLXArray {
+    return MLXFast.scaledDotProductAttention(
+        queries: queries, keys: keys, values: values, scale: scale, mask: mask,
+        memoryEfficientThreshold: memoryEfficientThreshold, forceFused: forceFused, stream: stream)
 }
 
 /// Root Mean Square normalization (RMS norm).

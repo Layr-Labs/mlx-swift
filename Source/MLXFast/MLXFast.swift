@@ -71,7 +71,23 @@ public func scaledDotProductAttention(
 ) -> MLXArray {
     return MLXFast.scaledDotProductAttention(
         queries: queries, keys: keys, values: values, scale: scale, mask: mask,
-        memoryEfficientThreshold: memoryEfficientThreshold, stream: stream)
+        memoryEfficientThreshold: memoryEfficientThreshold, forceFused: false, stream: stream)
+}
+
+/// Variant of `scaledDotProductAttention` that requires fused-kernel routing and reports an error
+/// when unsupported.
+@available(
+    *, deprecated, message: "scaledDotProductAttention is now available in the main MLX module"
+)
+@_disfavoredOverload
+public func scaledDotProductAttention(
+    queries: MLXArray, keys: MLXArray, values: MLXArray, scale: Float, mask: MLXArray?,
+    memoryEfficientThreshold: Int? = nil, forceFused: Bool,
+    stream: StreamOrDevice = .default
+) -> MLXArray {
+    return MLXFast.scaledDotProductAttention(
+        queries: queries, keys: keys, values: values, scale: scale, mask: mask,
+        memoryEfficientThreshold: memoryEfficientThreshold, forceFused: forceFused, stream: stream)
 }
 
 /// Root Mean Square normalization (RMS norm).

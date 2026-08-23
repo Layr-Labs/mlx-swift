@@ -74,6 +74,20 @@ class StreamTests: XCTestCase {
         print("here")
     }
 
+    /// `StreamOrDevice.stream(_:)` previously discarded its argument and
+    /// returned `Device.defaultStream()`, so every attempt to target a
+    /// non-default stream silently ran on the default one — work could never
+    /// be placed on a second command queue.
+    func testStreamOrDeviceHonorsTheGivenStream() {
+        let a = Stream(Device.gpu)
+        let b = Stream(Device.gpu)
+        XCTAssertNotEqual(a, b, "fresh streams must be distinct")
+
+        XCTAssertEqual(StreamOrDevice.stream(a).stream, a)
+        XCTAssertEqual(StreamOrDevice.stream(b).stream, b)
+        XCTAssertNotEqual(StreamOrDevice.stream(a).stream, StreamOrDevice.stream(b).stream)
+    }
+
     func disabledTestCreateStream() {
         // see https://github.com/ml-explore/mlx/issues/2118
         for _ in 1 ..< 10000 {

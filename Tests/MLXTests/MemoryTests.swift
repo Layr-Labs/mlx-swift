@@ -56,11 +56,11 @@ class MemoryTests: XCTestCase {
         let cappedWaves = min(waves, 200)  // hard cap so the default-limit run ends
         var cursor = 8
         var peak = 0
-        for _ in 0..<cappedWaves {
+        for _ in 0 ..< cappedWaves {
             autoreleasepool {
                 var keep: [MLXArray] = []
                 keep.reserveCapacity(perWave)
-                for _ in 0..<perWave {
+                for _ in 0 ..< perWave {
                     cursor += 1
                     let a = MLXArray(Array(repeating: Float(1), count: cursor))
                     keep.append((a + a).sum())
@@ -75,8 +75,9 @@ class MemoryTests: XCTestCase {
                 Memory.numResources, limit,
                 "resource count reached the hard limit — count-aware trim did not fire")
         }
-        print("[MemoryTests] resource-count churn: peak=\(peak) limit=\(limit) "
-            + "waves=\(cappedWaves) final=\(Memory.numResources)")
+        print(
+            "[MemoryTests] resource-count churn: peak=\(peak) limit=\(limit) "
+                + "waves=\(cappedWaves) final=\(Memory.numResources)")
         Memory.clearCache()
     }
 }

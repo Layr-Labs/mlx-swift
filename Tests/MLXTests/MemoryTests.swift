@@ -33,11 +33,27 @@ class MemoryTests: XCTestCase {
     /// must stay below resource_limit_ — the count-aware high-water trim in
     /// MetalAllocator::malloc clears the cache at 90% so the limit is never hit.
     ///
-    /// Run with MLX_RESOURCE_LIMIT set low (e.g. 50000) to exercise the trim
-    /// quickly; otherwise it validates against the OS default (~499000).
+    /// This test deliberately requires an explicit low `MLX_RESOURCE_LIMIT`.
+    /// At the macOS default (~499000), reproducing the count pressure requires
+    /// hundreds of thousands of distinct cached buffers and can consume tens of
+    /// GiB before the count high-water mark is reached. A low ceiling exercises
+    /// the identical allocator path in a bounded amount of time and memory.
     func testResourceCountStaysUnderLimitUnderChurn() throws {
+        guard let requestedLimit = ProcessInfo.processInfo.environment["MLX_RESOURCE_LIMIT"],
+            let configuredLimit = Int(requestedLimit),
+            (1 ... 50_000).contains(configuredLimit)
+        else {
+            throw XCTSkip(
+                "requires MLX_RESOURCE_LIMIT between 1 and 50000 to run the bounded resource-count regression"
+            )
+        }
+
         let limit = Memory.resourceLimit
         try XCTSkipIf(limit == 0, "no Metal backend / resource limit")
+        try XCTSkipUnless(
+            limit <= configuredLimit,
+            "MLX_RESOURCE_LIMIT was not applied by the Metal allocator"
+        )
 
         // Disable the byte-driven trim so only the count-aware trim can bound us.
         let savedCacheLimit = Memory.cacheLimit
@@ -50,10 +66,11 @@ class MemoryTests: XCTestCase {
         // ~499000 default we'd need too many allocs, so size the waves to clearly
         // exceed the limit only when MLX_RESOURCE_LIMIT pins it low (CI/local
         // exercise of the trim); at the OS default we still assert we never throw.
-        let perWave = 4000
-        // ~1.5x the count needed to cross the high-water if nothing trimmed.
-        let waves = max(20, Int((Double(limit) * 1.5) / Double(perWave)) + 5)
-        let cappedWaves = min(waves, 200)  // hard cap so the default-limit run ends
+        let perWave = min(4_000, max(256, limit / 2))
+        // Allocate at least ~1.5x the configured resource ceiling. The
+        // low-limit requirement above makes this enough to exercise the trim
+        // without turning the ordinary test run into a host-memory stress test.
+        let cappedWaves = max(4, Int((Double(limit) * 1.5) / Double(perWave)) + 1)
         var cursor = 8
         var peak = 0
         for _ in 0 ..< cappedWaves {

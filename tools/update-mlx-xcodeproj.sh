@@ -95,6 +95,7 @@ for x in \
     version.h \
     allocator.h \
     dtype.h \
+    error.h \
     event.h \
     small_vector.h \
     types/complex.h \
@@ -107,6 +108,8 @@ for x in \
     scheduler.h \
     primitives.h \
     backend/metal/device.h \
+    backend/metal/resident.h \
+    backend/common/metal_kernel.h \
     backend/common/utils.h \
     backend/cpu/encoder.h \
     backend/gpu/eval.h

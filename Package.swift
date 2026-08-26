@@ -316,7 +316,6 @@ let cmlx = Target.target(
         "mlx/mlx/distributed/mpi/mpi.cpp",
         "mlx/mlx/distributed/ring/ring.cpp",
         "mlx/mlx/distributed/nccl/nccl.cpp",
-        "mlx/mlx/distributed/nccl/nccl_stub",
         // jaccl: the real sources vs no_jaccl.cpp stub are selected per platform
         // in platformExcludes (Apple via mlx-conditional/jaccl_conditional.cpp;
         // Linux compiles no_jaccl.cpp directly), so neither is excluded here.

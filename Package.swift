@@ -333,7 +333,7 @@ let cmlx = Target.target(
         .headerSearchPath("mlx/mlx/distributed/jaccl/lib"),
         .headerSearchPath("json/single_include/nlohmann"),
         .headerSearchPath("fmt/include"),
-        .define("MLX_VERSION", to: "\"0.32.0\""),
+        .define("MLX_VERSION", to: "\"0.32.2\""),
     ],
     linkerSettings: linkerSettings,
     plugins: cudaBuildPlugins,

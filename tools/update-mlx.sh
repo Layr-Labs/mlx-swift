@@ -48,6 +48,7 @@ make \
     reduce \
     reduce_utils \
     scan \
+    searchsorted \
     scatter \
     scatter_axis \
     softmax \

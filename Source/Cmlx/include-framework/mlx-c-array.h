@@ -388,6 +388,14 @@ const bfloat16_t* mlx_array_data_bfloat16(const mlx_array arr);
 int _mlx_array_is_available(bool* res, const mlx_array arr);
 
 /**
+ * Backing descriptor identity and whether a constant cast may be retained.
+ * Does not evaluate the array. Retain a snapshot while using the identity.
+ * Internal function: use at your own risk.
+ */
+int _mlx_array_constant_cache_identity(
+    uintptr_t* identity, bool* can_cache, const mlx_array arr);
+
+/**
  * Wait on the array to be available. After this `_mlx_array_is_available`
  * returns `true`. Internal function: use at your own risk.
  */

@@ -1,7 +1,7 @@
 // Copyright © 2024 Apple Inc.
 
 import Foundation
-import MLX
+@_spi(QuantizedConstantCache) import MLX
 
 /// Protocol for layers that can be quantized
 public protocol Quantizable {
@@ -237,6 +237,24 @@ open class QuantizedEmbedding: Embedding, Quantized {
 /// - ``QuantizedLinear/init(_:_:bias:groupSize:bits:mode:)``
 open class QuantizedLinear: Linear, Quantized {
 
+    private let scaleCastCache = ConstantArrayCastCache()
+    private let offsetCastCache = ConstantArrayCastCache()
+    private let linearBiasCastCache = ConstantArrayCastCache()
+
+    @discardableResult
+    open override func update(
+        parameters: ModuleParameters, verify: VerifyUpdate, path: [String] = [],
+        modulePath: [String] = []
+    ) throws -> Self {
+        defer {
+            scaleCastCache.clear()
+            offsetCastCache.clear()
+            linearBiasCastCache.clear()
+        }
+        return try super.update(
+            parameters: parameters, verify: verify, path: path, modulePath: modulePath)
+    }
+
     public let groupSize: Int
     public let bits: Int
 
@@ -334,20 +352,25 @@ open class QuantizedLinear: Linear, Quantized {
     }
 
     open override func callAsFunction(_ x: MLXArray) -> MLXArray {
-        var x = quantizedMM(
-            x,
-            weight,
-            scales: scales,
-            biases: biases,
-            transpose: true,
-            groupSize: groupSize,
-            bits: bits,
-            mode: mode
-        )
-        if let bias {
-            x = x + bias
+        // The native affine operation already widens BF16 constants when x
+        // is FP32. Reuse precisely that conversion, without changing its
+        // promotion policy or touching MXFP4's packed U8 scales.
+        let scales = mode == .affine
+            ? (scaleCastCache.cachedCast(self.scales, to: x.dtype) ?? self.scales)
+            : self.scales
+        let biases = self.biases.map { offsets in
+            mode == .affine
+                ? (offsetCastCache.cachedCast(offsets, to: x.dtype) ?? offsets)
+                : offsets
         }
-        return x
+        var output = quantizedMM(
+            x, weight, scales: scales, biases: biases, transpose: true,
+            groupSize: groupSize, bits: bits, mode: mode)
+        if let bias {
+            let bias = linearBiasCastCache.cachedCast(bias, to: output.dtype) ?? bias
+            output = output + bias
+        }
+        return output
     }
 
     /// Returns a QuantizedLinear layer that applies the same linear transformation up to the quantization error.

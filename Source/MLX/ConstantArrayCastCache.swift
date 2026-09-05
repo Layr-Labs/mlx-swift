@@ -15,6 +15,7 @@ import Foundation
 public final class ConstantArrayCastCache {
     private struct Entry {
         let identity: UInt
+        let stream: StreamOrDevice
         let sourceSnapshot: MLXArray
         let converted: MLXArray
     }
@@ -48,12 +49,16 @@ public final class ConstantArrayCastCache {
                 // Do not retain a graph produced by compile/grad/vmap tracing.
                 return nil
             }
-            if let entry, entry.identity == identity {
+            // Cast primitives belong to the execution stream selected at graph
+            // construction. Reuse only within that same stream (and device).
+            let stream = StreamOrDevice.default
+            if let entry, entry.identity == identity, entry.stream == stream {
                 return entry.converted
             }
             let snapshot = source.copyContext()
-            let converted = snapshot.asType(.float32)
-            entry = Entry(identity: identity, sourceSnapshot: snapshot, converted: converted)
+            let converted = snapshot.asType(.float32, stream: stream)
+            entry = Entry(
+                identity: identity, stream: stream, sourceSnapshot: snapshot, converted: converted)
             return converted
         }
     }

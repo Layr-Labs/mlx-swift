@@ -3,6 +3,46 @@ import Foundation
 import XCTest
 
 final class ConstantArrayCastCacheTests: XCTestCase {
+    func testDefaultDeviceChangeInvalidatesCast() {
+        let cache = ConstantArrayCastCache(enabled: true)
+        let source = MLXArray([1.25, -2.5] as [Float]).asType(.bfloat16, stream: .cpu)
+        eval(source)
+        let cpu = Device.withDefaultDevice(.cpu) {
+            let result = cache.cachedCast(source, to: .float32)!
+            XCTAssertTrue(result === cache.cachedCast(source, to: .float32)!)
+            XCTAssertEqual(result.asArray(Float.self), [1.25, -2.5])
+            return result
+        }
+        Device.withDefaultDevice(.gpu) {
+            let result = cache.cachedCast(source, to: .float32)!
+            XCTAssertFalse(cpu === result)
+            XCTAssertTrue(result === cache.cachedCast(source, to: .float32)!)
+            XCTAssertEqual(result.asArray(Float.self), [1.25, -2.5])
+        }
+    }
+
+    func testNewDefaultStreamInvalidatesCastOnSameDevice() {
+        let cache = ConstantArrayCastCache(enabled: true)
+        let source = MLXArray([1.25, -2.5] as [Float]).asType(.bfloat16, stream: .cpu)
+        eval(source)
+        Stream.withNewDefaultStream(device: .cpu) {
+            let outer = cache.cachedCast(source, to: .float32)!
+            XCTAssertTrue(outer === cache.cachedCast(source, to: .float32)!)
+            XCTAssertEqual(outer.asArray(Float.self), [1.25, -2.5])
+            Stream.withNewDefaultStream(device: .cpu) {
+                let inner = cache.cachedCast(source, to: .float32)!
+                XCTAssertFalse(outer === inner)
+                XCTAssertTrue(inner === cache.cachedCast(source, to: .float32)!)
+                XCTAssertEqual(inner.asArray(Float.self), [1.25, -2.5])
+            }
+            // Returning to the outer scope replaces the single retained entry.
+            let restored = cache.cachedCast(source, to: .float32)!
+            XCTAssertFalse(outer === restored)
+            XCTAssertTrue(restored === cache.cachedCast(source, to: .float32)!)
+            XCTAssertEqual(restored.asArray(Float.self), [1.25, -2.5])
+        }
+    }
+
     func testReusesBackingAndInvalidatesSameSwiftObjectUpdates() {
         let cache = ConstantArrayCastCache()
         let source = MLXArray([1.25, -2.5] as [Float]).asType(.bfloat16)

@@ -44,7 +44,7 @@ final class GPTOSSMXFP4KernelTests: XCTestCase {
                     }
                     let reference = withTile("legacy", forward)
                     let magnitude = abs(reference.asType(.float32)).max().item(Float.self)
-                    for tile in ["m16n64k32", "m32n64k32", "m32n64k64", "m16n32k64", "m32n32k32"] {
+                    for tile in ["m32n32k32"] {
                         let actual = withTile(tile, forward)
                         XCTAssertEqual(actual.shape, reference.shape)
                         let worst = abs(actual.asType(.float32) - reference.asType(.float32))

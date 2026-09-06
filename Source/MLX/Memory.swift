@@ -237,7 +237,10 @@ public enum Memory {
         }
     }
 
-    /// Return a snapshot of memory stats -- see ``Snapshot`` for more details.
+    /// Return memory stats captured together under the allocator lock.
+    ///
+    /// This does not wait for streams or include allocations that have not yet
+    /// entered allocator accounting. See ``Snapshot`` for more details.
     ///
     /// Get the current memory use.  This can be used to measure before/after and current memory use:
     ///
@@ -246,7 +249,11 @@ public enum Memory {
     /// print(currentMemory)
     /// ```
     public static func snapshot() -> Snapshot {
-        Snapshot(activeMemory: activeMemory, cacheMemory: cacheMemory, peakMemory: peakMemory)
+        var active: size_t = 0
+        var cache: size_t = 0
+        var peak: size_t = 0
+        mlx_get_memory_snapshot(&active, &cache, &peak)
+        return Snapshot(activeMemory: active, cacheMemory: cache, peakMemory: peak)
     }
 
     /// Get or set the free cache limit.

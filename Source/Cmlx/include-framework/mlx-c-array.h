@@ -387,6 +387,14 @@ const bfloat16_t* mlx_array_data_bfloat16(const mlx_array arr);
  */
 int _mlx_array_is_available(bool* res, const mlx_array arr);
 
+/** Non-blocking backing metadata. Unavailable arrays return available=false.
+ *  Views may report shared backing; these fields do not confer ownership. */
+int mlx_array_get_buffer_info(
+    bool* available, size_t* allocated_bytes, size_t* data_offset,
+    size_t* data_elements, bool* row_contiguous, bool* unique,
+    const mlx_array arr);
+
+
 /**
  * Backing descriptor identity and whether a constant cast may be retained.
  * Does not evaluate the array. Retain a snapshot while using the identity.

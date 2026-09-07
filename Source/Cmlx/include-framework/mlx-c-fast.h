@@ -197,6 +197,20 @@ int mlx_fast_scaled_dot_product_attention(
     const mlx_array sinks /* may be null */,
     const mlx_stream s);
 
+/* Explicit fused routing refuses unsupported shapes instead of allocating
+ * composed attention scores. The original entry point keeps default routing. */
+int mlx_fast_scaled_dot_product_attention_with_force_fused(
+    mlx_array* res,
+    const mlx_array queries,
+    const mlx_array keys,
+    const mlx_array values,
+    float scale,
+    const char* mask_mode,
+    const mlx_array mask_arr /* may be null */,
+    const mlx_array sinks /* may be null */,
+    bool force_fused,
+    const mlx_stream s);
+
 /**@}*/
 
 #ifdef __cplusplus

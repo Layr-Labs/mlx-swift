@@ -6,6 +6,22 @@ import XCTest
 
 class MemoryTests: XCTestCase {
 
+    func testCoherentSnapshotTracksRetainedBuffer() {
+        Memory.clearCache()
+        let before = Memory.snapshot()
+        let values = [Float](repeating: 1, count: 16384)
+        let retained = MLXArray(values)
+        withExtendedLifetime(retained) {
+            let during = Memory.snapshot()
+            XCTAssertGreaterThanOrEqual(
+                during.activeMemory - before.activeMemory,
+                values.count * MemoryLayout<Float>.stride)
+            XCTAssertEqual(during.activeMemory, Memory.activeMemory)
+            XCTAssertEqual(during.cacheMemory, Memory.cacheMemory)
+            XCTAssertEqual(during.peakMemory, Memory.peakMemory)
+        }
+    }
+
     func testWiredMemory() {
         Memory.withWiredLimit(1024 * 1024 * 256) {
             let x = MLXArray(10)

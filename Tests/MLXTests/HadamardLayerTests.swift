@@ -43,13 +43,13 @@ class HadamardLayerTests: XCTestCase {
                 XCTAssertEqual(lookup.dtype, dtype)
                 XCTAssertLessThan(abs(lookup - unfolded[ids]).max().item(Float.self), 1e-5)
                 let input = weights[0 ..< 2].asType(dtype)
-                let reference = input.asType(.float32).matmul(unfolded.asType(.float32).T)
+                // Published runtime contract: rotate activations then use packed
+                // MM. Dense unfolded GEMM is a different reduction path,
+                // not an exact oracle for the published packed operation.
+                let reference = quantizedMM(transform(input), packed, scales: scales,
+                    biases: biases, groupSize: 128, bits: bits).asType(.float32)
                 let actual = embedding.asLinear(input).asType(.float32)
-                let difference = actual - reference
-                let relative =
-                    (difference * difference).sum().sqrt()
-                    / (reference * reference).sum().sqrt()
-                XCTAssertLessThan(relative.item(Float.self), dtype == .float32 ? 1e-4 : 0.02)
+                XCTAssertEqual(actual.asArray(Float.self), reference.asArray(Float.self))
                 XCTAssertTrue(embedding.trainableParameters().flattened().isEmpty)
                 XCTAssertNil(quantizeSingle(layer: embedding))
             }
@@ -82,12 +82,10 @@ class HadamardLayerTests: XCTestCase {
             bias: MLXArray([Float(0.25), -0.25]), scales: scales, biases: biases,
             groupSize: 128, bits: 2, transform: transform, gdnLayout: layout)
         let reference =
-            transform(grouped).matmul(
-                dequantized(
-                    packed, scales: scales, biases: biases, groupSize: 128, bits: 2
-                ).T)
+            quantizedMM(transform(grouped), packed,
+                scales: scales, biases: biases, groupSize: 128, bits: 2)
             + MLXArray([Float(0.25), -0.25])
-        XCTAssertLessThan(abs(layer(input) - reference).max().item(Float.self), 1e-4)
+        XCTAssertEqual(layer(input).asArray(Float.self), reference.asArray(Float.self))
         XCTAssertThrowsError(try HadamardGDNLayout(width: 512, keyHeads: 3, valueHeads: 4))
     }
 
@@ -156,14 +154,31 @@ class HadamardLayerTests: XCTestCase {
             let linear = try HadamardQuantizedLinear(
                 weight: packed, scales: scales, biases: biases,
                 groupSize: 128, bits: bits, transform: transform)
-            let unfolded = transform.inverse(
-                dequantized(packed, scales: scales, biases: biases, groupSize: 128, bits: bits))
             let input = weights[0 ..< 2]
-            let reference = input.matmul(unfolded.T)
-            let difference = linear(input) - reference
-            let relative =
-                (difference * difference).sum().sqrt() / (reference * reference).sum().sqrt()
-            XCTAssertLessThan(relative.item(Float.self), 1e-4, "bits \(bits)")
+            let reference = quantizedMM(transform(input), packed,
+                scales: scales, biases: biases, groupSize: 128, bits: bits)
+            XCTAssertEqual(linear(input).asArray(Float.self), reference.asArray(Float.self), "bits \(bits)")
+        }
+    }
+
+    /// Retain the unfolded-basis algebra check on CPU, separate from the exact
+    /// GPU packed-operation oracle above. Do not loosen a GPU error threshold
+    /// to disguise the different dense GEMM/reduction path.
+    func testUnfoldedBasisAlgebraOnCPU() throws {
+        try Device.withDefaultDevice(.cpu) {
+            let width = 512
+            let transform = try SignedBlockHadamard(blockSize: 128,
+                signs: (0 ..< width).map { $0 % 3 == 0 ? -1 : 1 })
+            let weight = MLXArray((0 ..< 4 * width).map { Float(($0 * 13) % 31 - 15) / 16 }, [4, width])
+            let (packed, scales, biases) = quantized(weight, groupSize: 128, bits: 2)
+            let layer = try HadamardQuantizedLinear(weight: packed, scales: scales,
+                biases: biases, groupSize: 128, bits: 2, transform: transform)
+            let unfolded = transform.inverse(dequantized(packed, scales: scales,
+                biases: biases, groupSize: 128, bits: 2))
+            let reference = weight[0 ..< 2].matmul(unfolded.T)
+            let delta = layer(weight[0 ..< 2]) - reference
+            let relative = (delta * delta).sum().sqrt() / (reference * reference).sum().sqrt()
+            XCTAssertLessThan(relative.item(Float.self), 1e-4)
         }
     }
 }

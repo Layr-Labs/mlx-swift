@@ -178,6 +178,23 @@ public struct HadamardGDNLayout {
 public final class HadamardQuantizedLinear: QuantizedLinear {
     public let transform: SignedBlockHadamard
     public let gdnLayout: HadamardGDNLayout?
+    private static let reuseFloat16Constants = float16ConstantReuseEnabled(
+        environmentValue: ProcessInfo.processInfo.environment[
+            "DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"])
+
+    /// Preserve explicit opt-out/invalid spellings; an absent override uses
+    /// the qualified default without relaxing packed-operator eligibility.
+    static func float16ConstantReuseEnabled(environmentValue: String?) -> Bool {
+        environmentValue == nil || environmentValue == "1"
+    }
+
+    /// Qualification witness; this selects reuse, never a different precision
+    /// or packed-matmul kernel. The process-wide generic cache kill switch also
+    /// remains effective. No cached arrays enter the module parameter tree.
+    var permitsFloat16ConstantReuse: Bool {
+        Self.reuseFloat16Constants && bits == 2 && groupSize == 128
+            && transform.blockSize == 1024 && scales.dtype == .float16
+    }
 
     public init(
         weight: MLXArray, bias: MLXArray? = nil, scales: MLXArray, biases: MLXArray?,
@@ -206,7 +223,11 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
     }
 
     public override func callAsFunction(_ x: MLXArray) -> MLXArray {
-        super.callAsFunction(transform(gdnLayout.map { $0(x) } ?? x))
+        let rotated = transform(gdnLayout.map { $0(x) } ?? x)
+        if permitsFloat16ConstantReuse && rotated.dtype == .float32 {
+            return constantCachedForward(rotated, allowFloat16: true)
+        }
+        return super.callAsFunction(rotated)
     }
 }
 

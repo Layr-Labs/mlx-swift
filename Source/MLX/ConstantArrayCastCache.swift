@@ -3,7 +3,8 @@
 import Cmlx
 import Foundation
 
-/// Internal, bounded reuse of an exact BF16-to-FP32 constant conversion.
+/// Internal, bounded reuse of an exact widening constant conversion.
+/// BF16 is the default; a model-specific caller may explicitly opt into FP16.
 ///
 /// The retained context snapshot pins the backing descriptor, not the Swift
 /// object. `Module.update`, indexed assignment, and compile-state replacement
@@ -38,8 +39,12 @@ public final class ConstantArrayCastCache {
 
     /// Return nil to keep the caller's original operation ordering during
     /// tracing or on any other dtype path, including packed MXFP4 U8 scales.
-    public func cachedCast(_ source: MLXArray, to dtype: DType) -> MLXArray? {
-        guard enabled, dtype == .float32, source.dtype == .bfloat16 else { return nil }
+    public func cachedCast(
+        _ source: MLXArray, to dtype: DType, allowFloat16: Bool = false
+    ) -> MLXArray? {
+        guard enabled, dtype == .float32,
+            source.dtype == .bfloat16 || (allowFloat16 && source.dtype == .float16)
+        else { return nil }
         return lock.withLock {
             var identity: UInt = 0
             var canCache = false

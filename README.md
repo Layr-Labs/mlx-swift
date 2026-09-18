@@ -2,6 +2,8 @@
 
 [**Installation**](#installation) | [**Documentation**](https://swiftpackageindex.com/ml-explore/mlx-swift/main/documentation/mlx) | [**Examples**](#examples)
 
+> **This is a fork.** `Layr-Labs/mlx-swift` tracks [`ml-explore/mlx-swift`](https://github.com/ml-explore/mlx-swift) and is the Swift layer of Layr-Labs' Apple-silicon inference stack (`mlx` → `mlx-c` → `mlx-swift` → `mlx-swift-lm`). Everything changed relative to upstream is published as a fork diff at **https://layr-labs.github.io/mlx-swift/**, described in [`fork.yaml`](fork.yaml) and kept honest by CI — see [FORKDIFF.md](FORKDIFF.md).
+
 MLX Swift is a Swift API for [MLX](https://ml-explore.github.io/mlx/build/html/index.html).
 
 MLX is an array framework for machine learning on Apple silicon. MLX Swift

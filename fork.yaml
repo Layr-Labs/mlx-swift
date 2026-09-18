@@ -144,6 +144,9 @@ def:
             compile-state replacement invalidate correctly, and allocator ABA can't alias),
             leaving U8 MXFP4 scales untouched and the reflected parameter tree unchanged.
             `MLX_QUANTIZED_CONSTANT_CACHE=0` restores the original path.
+            A private, default-off Bonsai profile permits exact FP16→FP32
+            widening reuse for eligible 2-bit/group128/block1024 Hadamard
+            projections; all other callers retain the BF16-only contract.
           globs:
             - "Source/MLX/ConstantArrayCastCache.swift"
             - "Source/MLXNN/Quantized.swift"

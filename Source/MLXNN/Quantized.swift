@@ -352,22 +352,32 @@ open class QuantizedLinear: Linear, Quantized {
     }
 
     open override func callAsFunction(_ x: MLXArray) -> MLXArray {
+        constantCachedForward(x, allowFloat16: false)
+    }
+
+    /// Shared arithmetic path; FP16 widening reuse is private and opt-in for
+    /// an eligible packed-Hadamard caller. Ordinary quantized layers retain
+    /// the established BF16-only cache contract.
+    func constantCachedForward(_ x: MLXArray, allowFloat16: Bool) -> MLXArray {
         // The native affine operation already widens BF16 constants when x
         // is FP32. Reuse precisely that conversion, without changing its
         // promotion policy or touching MXFP4's packed U8 scales.
         let scales = mode == .affine
-            ? (scaleCastCache.cachedCast(self.scales, to: x.dtype) ?? self.scales)
+            ? (scaleCastCache.cachedCast(self.scales, to: x.dtype,
+                allowFloat16: allowFloat16) ?? self.scales)
             : self.scales
         let biases = self.biases.map { offsets in
             mode == .affine
-                ? (offsetCastCache.cachedCast(offsets, to: x.dtype) ?? offsets)
+                ? (offsetCastCache.cachedCast(offsets, to: x.dtype,
+                    allowFloat16: allowFloat16) ?? offsets)
                 : offsets
         }
         var output = quantizedMM(
             x, weight, scales: scales, biases: biases, transpose: true,
             groupSize: groupSize, bits: bits, mode: mode)
         if let bias {
-            let bias = linearBiasCastCache.cachedCast(bias, to: output.dtype) ?? bias
+            let bias = linearBiasCastCache.cachedCast(bias, to: output.dtype,
+                allowFloat16: allowFloat16) ?? bias
             output = output + bias
         }
         return output

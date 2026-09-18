@@ -147,6 +147,16 @@ def:
           globs:
             - "Source/MLX/ConstantArrayCastCache.swift"
             - "Source/MLXNN/Quantized.swift"
+        - title: "Bonsai packed signed-Hadamard layers"
+          description: |
+            Prism-compatible signed block-Hadamard transforms, packed affine
+            linear layers and inverse-transformed embedding lookup preserve the
+            published rotated checkpoint representation. Transforms use FP32
+            intermediates and restore the incoming dtype; explicit signs and
+            packed geometry are validated without unfolding or requantizing.
+            Adapted from PrismML-Eng/mlx-swift under its MIT attribution.
+          globs:
+            - "Source/MLXNN/Hadamard.swift"
         - title: "Custom Metal kernels: mutable inputs"
           description: |
             Swift custom Metal kernels take a default-empty `mutableInputs` list, forwarded

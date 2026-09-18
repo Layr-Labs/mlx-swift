@@ -4,6 +4,14 @@ import Foundation
 import XCTest
 
 final class Float16ConstantCastTests: XCTestCase {
+    func testDefaultAndExplicitConstantReusePolicy() {
+        XCTAssertTrue(HadamardQuantizedLinear.float16ConstantReuseEnabled(environmentValue: nil))
+        XCTAssertTrue(HadamardQuantizedLinear.float16ConstantReuseEnabled(environmentValue: "1"))
+        for value in ["0", "", "false", "true", "off", "on", " 1", "invalid"] {
+            XCTAssertFalse(HadamardQuantizedLinear.float16ConstantReuseEnabled(environmentValue: value))
+        }
+    }
+
     func testExplicitOptInReusesExactWideningForEveryHalfBitPattern() throws {
         let cache = ConstantArrayCastCache(enabled: true)
         let source = MLXArray(Array(UInt16.min...UInt16.max)).view(dtype: .float16)
@@ -93,8 +101,8 @@ final class Float16ConstantCastTests: XCTestCase {
             init(_ child: HadamardQuantizedLinear) { self.child = child; super.init() }
         }
         let layer = try layer()
-        XCTAssertEqual(layer.permitsFloat16ConstantReuse,
-            ProcessInfo.processInfo.environment["DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"] == "1")
+        let override = ProcessInfo.processInfo.environment["DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"]
+        XCTAssertEqual(layer.permitsFloat16ConstantReuse, override == nil || override == "1")
         let names = layer.parameters().flattened().map(\.0).sorted()
         for dtype in [DType.float32, .float16, .bfloat16, .float32] {
             for rows in [1, 129] {

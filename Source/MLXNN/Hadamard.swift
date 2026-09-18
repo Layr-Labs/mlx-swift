@@ -178,8 +178,15 @@ public struct HadamardGDNLayout {
 public final class HadamardQuantizedLinear: QuantizedLinear {
     public let transform: SignedBlockHadamard
     public let gdnLayout: HadamardGDNLayout?
-    private static let reuseFloat16Constants = ProcessInfo.processInfo.environment[
-        "DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"] == "1"
+    private static let reuseFloat16Constants = float16ConstantReuseEnabled(
+        environmentValue: ProcessInfo.processInfo.environment[
+            "DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"])
+
+    /// Preserve explicit opt-out/invalid spellings; an absent override uses
+    /// the qualified default without relaxing packed-operator eligibility.
+    static func float16ConstantReuseEnabled(environmentValue: String?) -> Bool {
+        environmentValue == nil || environmentValue == "1"
+    }
 
     /// Qualification witness; this selects reuse, never a different precision
     /// or packed-matmul kernel. The process-wide generic cache kill switch also

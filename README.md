@@ -193,6 +193,21 @@ Ronan Collobert.
 
 ## Versions
 
+### Packed signed-Hadamard layers
+
+`MLXNN.SignedBlockHadamard`, `HadamardQuantizedLinear`, and
+`HadamardQuantizedEmbedding` support already-packed affine weights with explicit
+signed block transforms. The transform uses Float32 intermediates and restores
+the input dtype, matching the published Ternary Bonsai 2 MLX pack. This is not a
+GGUF loader, a quantizer, or a claim of full-model qualification. Existing MLX
+Hadamard and 2-bit affine primitives are reused without core kernel changes.
+
+The layer implementation and tests are adapted from
+[PrismML-Eng/mlx-swift](https://github.com/PrismML-Eng/mlx-swift/tree/6d3a84de28225d1f5bc0a56f5c781596997242f9),
+under the repository's MIT license (copyright 2023 ml-explore). No Prism 1-bit,
+CUDA, or optimizer changes are included. Run `swift test --filter HadamardLayerTests`
+with the source-matched Metal library available to validate this layer surface.
+
 See [Releases](https://github.com/ml-explore/mlx-swift/releases).  Generally the MLX Swift version number corresponds to the same version number in [MLX](https://github.com/ml-explore/mlx).  Release notes indicate specifics.
 
 All capabilities in MLX (Python) should be available in MLX Swift.  If you encounter any that are missing please file an issue or feel free to submit a PR.

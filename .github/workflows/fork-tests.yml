@@ -10,7 +10,8 @@ on:
 
 concurrency:
   group: fork-tests-${{ github.ref }}
-  # Cancel an older run on pull requests only. Runs on main always finish.
+  # On a pull request, a new run cancels the older run.
+  # On main, a new run does not stop a run that has started. It can replace a run that still waits in the queue.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -86,8 +87,9 @@ jobs:
 
       - name: Run the tests
         env:
-          # Run the SortedGatherQuantizedMMTests that cover the fork's sorted expert-tile kernels.
-          # Without this flag they skip.
+          # MLX reads this flag once, when it opens the Metal device. It turns on the sorted expert-tile route for the whole test run.
+          # Today only the allow-listed shapes in SortedGatherQuantizedMMTests take that route.
+          # Without the flag, five tests in that suite skip.
           MLX_GATHER_QMM_EXPERT_SLICES: "1"
         run: |
           swift test --skip-build 2>&1 | tee "$RUNNER_TEMP/swift-test.log"

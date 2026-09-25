@@ -101,3 +101,10 @@ jobs:
             echo "::error::The test run executed zero tests."
             exit 1
           fi
+          # XCTest counts a skipped test as executed. Fail on any skip outside the opt-in perf suite.
+          unexpected=$(grep -E "^Test Case '.*' skipped \(" "$RUNNER_TEMP/swift-test.log" | grep -v QwenExpertTilePerfTests || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::Unexpected skipped tests:"
+            echo "$unexpected"
+            exit 1
+          fi

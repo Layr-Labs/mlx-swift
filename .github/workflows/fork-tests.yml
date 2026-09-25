@@ -50,7 +50,6 @@ jobs:
           sw_vers
           xcodebuild -version
           swift --version
-          system_profiler SPDisplaysDataType
           echo "version=$(xcodebuild -version | awk 'NR == 1 { v = $2 } NR == 2 { b = $3 } END { print v "-" b }')" >> "$GITHUB_OUTPUT"
 
       - name: Restore the SwiftPM cache

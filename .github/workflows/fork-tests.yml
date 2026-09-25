@@ -84,6 +84,10 @@ jobs:
             .build
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
+      - name: Build the full Metal library
+        # A SwiftPM command-line build compiles no Metal kernels, so the tests find no metallib.
+        run: scripts/build-metallib.sh
+
       - name: Run the tests
         run: |
           swift test --skip-build 2>&1 | tee "$RUNNER_TEMP/swift-test.log"

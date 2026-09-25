@@ -27,29 +27,26 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Select an Xcode with Swift 6.3 or newer
+      - name: Select the newest release of Xcode 26
         id: xcode
         run: |
           ls -ld /Applications/Xcode*
-          selected=""
-          # Try the newest Xcode first.
-          for app in $(printf '%s\n' /Applications/Xcode_*.app | sort -r -V); do
-            version=$(DEVELOPER_DIR="$app/Contents/Developer" xcrun swift --version 2>/dev/null \
-              | sed -n 's/.*Swift version \([0-9][0-9.]*\).*/\1/p' | head -n 1)
-            echo "$app has Swift $version"
-            if [ -n "$version" ] && [ "$(printf '%s\n' 6.3 "$version" | sort -V | head -n 1)" = 6.3 ]; then
-              selected=$app
-              break
-            fi
-          done
-          if [ -z "$selected" ]; then
-            echo "::error::No Xcode on this runner has Swift 6.3 or newer."
+          # Beta and release candidate app names contain letters, so this pattern skips them.
+          # A new Xcode major version on the image does not change CI until a PR changes this pattern.
+          app=$(printf '%s\n' /Applications/Xcode_26.*.app | grep -E '^/Applications/Xcode_26(\.[0-9]+)+\.app$' | sort -V | tail -n 1 || true)
+          if [ -z "$app" ]; then
+            echo "::error::This runner has no release of Xcode 26."
             exit 1
           fi
-          sudo xcode-select -s "$selected"
+          sudo xcode-select -s "$app"
           sw_vers
           xcodebuild -version
           swift --version
+          version=$(swift --version 2>/dev/null | sed -n 's/.*Swift version \([0-9][0-9.]*\).*/\1/p' | head -n 1)
+          if [ "$(printf '%s\n' 6.3 "$version" | sort -V | head -n 1)" != 6.3 ]; then
+            echo "::error::$app has Swift $version. The package needs Swift 6.3 or newer."
+            exit 1
+          fi
           echo "version=$(xcodebuild -version | awk 'NR == 1 { v = $2 } NR == 2 { b = $3 } END { print v "-" b }')" >> "$GITHUB_OUTPUT"
 
       - name: Restore the SwiftPM cache

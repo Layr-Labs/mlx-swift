@@ -15,11 +15,23 @@ jobs:
           # Fetch the merge commit and its parents. The first parent is the base branch.
           fetch-depth: 2
 
+      - name: Select the newest release of Xcode 26
+        run: |
+          ls -ld /Applications/Xcode*
+          # Beta and release candidate app names contain letters, so this pattern skips them.
+          # A new Xcode major version on the image does not change CI until a PR changes this pattern.
+          app=$(printf '%s\n' /Applications/Xcode_26.*.app | grep -E '^/Applications/Xcode_26(\.[0-9]+)+\.app$' | sort -V | tail -n 1 || true)
+          if [ -z "$app" ]; then
+            echo "::error::This runner has no release of Xcode 26."
+            exit 1
+          fi
+          sudo xcode-select -s "$app"
+          xcodebuild -version
+          swift format --version
+
       - name: Lint the Swift files that this pull request changes
         # Main does not pass this lint yet, so check only the changed files.
         run: |
-          xcodebuild -version
-          swift format --version
           git diff --name-only --diff-filter=d HEAD^1 HEAD -- '*.swift' > "$RUNNER_TEMP/swift-files"
           echo "Swift files that this pull request changes:"
           cat "$RUNNER_TEMP/swift-files"

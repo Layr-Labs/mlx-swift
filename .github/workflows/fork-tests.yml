@@ -88,6 +88,10 @@ jobs:
         run: scripts/build-metallib.sh
 
       - name: Run the tests
+        env:
+          # Run the SortedGatherQuantizedMMTests that cover the fork's sorted expert-tile kernels.
+          # Without this flag they skip.
+          MLX_GATHER_QMM_EXPERT_SLICES: "1"
         run: |
           swift test --skip-build 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
           # XCTest prints a summary line for each suite. The last line covers the whole run.

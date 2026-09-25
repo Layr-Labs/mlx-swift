@@ -1,0 +1,96 @@
+name: Fork Tests
+
+# Build the fork and run its tests on a GitHub-hosted macOS runner.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: fork-tests-${{ github.ref }}
+  # Cancel an older run on pull requests only. Runs on main always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+
+      - name: Select an Xcode with Swift 6.3 or newer
+        id: xcode
+        run: |
+          ls -ld /Applications/Xcode*
+          selected=""
+          # Try the newest Xcode first.
+          for app in $(printf '%s\n' /Applications/Xcode_*.app | sort -r -V); do
+            version=$(DEVELOPER_DIR="$app/Contents/Developer" xcrun swift --version 2>/dev/null \
+              | sed -n 's/.*Swift version \([0-9][0-9.]*\).*/\1/p' | head -n 1)
+            echo "$app has Swift $version"
+            if [ -n "$version" ] && [ "$(printf '%s\n' 6.3 "$version" | sort -V | head -n 1)" = 6.3 ]; then
+              selected=$app
+              break
+            fi
+          done
+          if [ -z "$selected" ]; then
+            echo "::error::No Xcode on this runner has Swift 6.3 or newer."
+            exit 1
+          fi
+          sudo xcode-select -s "$selected"
+          sw_vers
+          xcodebuild -version
+          swift --version
+          system_profiler SPDisplaysDataType
+          echo "version=$(xcodebuild -version | awk 'NR == 1 { v = $2 } NR == 2 { b = $3 } END { print v "-" b }')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the SwiftPM cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+            .build
+          key: ${{ runner.os }}-swiftpm-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+
+      - name: Build the package and its tests
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          start=$(date +%s)
+          swift build --build-tests
+          seconds=$(( $(date +%s) - start ))
+          echo "swift build --build-tests took $(( seconds / 60 )) min $(( seconds % 60 )) s."
+          echo "Build wall time: $(( seconds / 60 )) min $(( seconds % 60 )) s. Cache hit: ${CACHE_HIT:-false}." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the SwiftPM cache
+        # Save on pushes to main only. Pull requests read the cache from main.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+            .build
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Run the tests
+        run: |
+          swift test --skip-build 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          # XCTest prints a summary line for each suite. The last line covers the whole run.
+          summary=$(grep -E 'Executed [0-9]+ tests?, with' "$RUNNER_TEMP/swift-test.log" | tail -n 1 || true)
+          echo "Test summary: $summary" >> "$GITHUB_STEP_SUMMARY"
+          if ! echo "$summary" | grep -Eq 'Executed [1-9][0-9]* tests?, with'; then
+            echo "::error::The test run executed zero tests."
+            exit 1
+          fi

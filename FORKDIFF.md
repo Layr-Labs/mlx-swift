@@ -44,17 +44,10 @@ would swallow upstream's changes after a bad rebase and defeat the gate. The
 one broad glob here, `Source/Cmlx/mlx-generated/**`, is deliberate: that tree
 is regenerated wholesale from the core pin and has no hand-written content.
 
-**Rebasing onto newer upstream.** The gate will fail with the new merge-base
-in its message:
-
-```
-git fetch https://github.com/ml-explore/mlx-swift.git main:refs/remotes/upstream/main
-git merge-base HEAD refs/remotes/upstream/main      # → new base.hash
-```
-
-Set `base.hash` to that value, then run the check locally and fix what it
-reports — usually files upstream absorbed (stale globs to delete) and files
-that moved (globs to rename):
+**Upstream sync policy (2026-09-25).** This fork does not merge or rebase onto
+upstream. `base.hash` stays fixed. An upstream fix the fork needs is ported as
+its own commit and described in its own `fork.yaml` section. The check keeps
+comparing the fork against the fixed base:
 
 ```
 python3 -m pip install pyyaml

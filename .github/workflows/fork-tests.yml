@@ -65,9 +65,9 @@ jobs:
           CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         run: |
           start=$(date +%s)
-          swift build --build-tests
+          swift build --build-tests --enable-code-coverage
           seconds=$(( $(date +%s) - start ))
-          echo "swift build --build-tests took $(( seconds / 60 )) min $(( seconds % 60 )) s."
+          echo "swift build --build-tests --enable-code-coverage took $(( seconds / 60 )) min $(( seconds % 60 )) s."
           echo "Build wall time: $(( seconds / 60 )) min $(( seconds % 60 )) s. Cache hit: ${CACHE_HIT:-false}." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save the SwiftPM cache
@@ -92,7 +92,7 @@ jobs:
           # Without the flag, five tests in that suite skip.
           MLX_GATHER_QMM_EXPERT_SLICES: "1"
         run: |
-          swift test --skip-build 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          swift test --skip-build --enable-code-coverage 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
           # XCTest prints a summary line for each suite. The last line covers the whole run.
           summary=$(grep -E 'Executed [0-9]+ tests?, with' "$RUNNER_TEMP/swift-test.log" | tail -n 1 || true)
           echo "Test summary: $summary" >> "$GITHUB_STEP_SUMMARY"
@@ -107,3 +107,25 @@ jobs:
             echo "$unexpected"
             exit 1
           fi
+
+      - name: Report line coverage
+        run: |
+          bin=$(swift build --show-bin-path)
+          xcrun llvm-cov report "$bin/mlx-swiftPackageTests.xctest/Contents/MacOS/mlx-swiftPackageTests" \
+            -instr-profile "$bin/codecov/default.profdata" \
+            -ignore-filename-regex '/Tests/|/\.build/' > "$RUNNER_TEMP/coverage-report.txt"
+          total=$(awk '$1 == "TOTAL"' "$RUNNER_TEMP/coverage-report.txt")
+          echo "$total"
+          # Field 10 of the TOTAL line is the line coverage percent.
+          {
+            echo "| Component | Line coverage |"
+            echo "|---|---|"
+            echo "| All sources except Tests and .build | $(echo "$total" | awk '{ print $10 }') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report
+          path: ${{ runner.temp }}/coverage-report.txt
+          retention-days: 7

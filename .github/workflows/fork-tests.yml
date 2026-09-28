@@ -1,0 +1,109 @@
+name: Fork Tests
+
+# Build the fork and run its tests on a GitHub-hosted macOS runner.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: fork-tests-${{ github.ref }}
+  # On a pull request, a new run cancels the older run.
+  # On main, a new run does not stop a run that has started. It can replace a run that still waits in the queue.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+
+      - name: Select the newest release of Xcode 26
+        id: xcode
+        run: |
+          ls -ld /Applications/Xcode*
+          # Beta and release candidate app names contain letters, so this pattern skips them.
+          # A new Xcode major version on the image does not change CI until a PR changes this pattern.
+          app=$(printf '%s\n' /Applications/Xcode_26.*.app | grep -E '^/Applications/Xcode_26(\.[0-9]+)+\.app$' | sort -V | tail -n 1 || true)
+          if [ -z "$app" ]; then
+            echo "::error::This runner has no release of Xcode 26."
+            exit 1
+          fi
+          sudo xcode-select -s "$app"
+          sw_vers
+          xcodebuild -version
+          swift --version
+          version=$(swift --version 2>/dev/null | sed -n 's/.*Swift version \([0-9][0-9.]*\).*/\1/p' | head -n 1)
+          if [ "$(printf '%s\n' 6.3 "$version" | sort -V | head -n 1)" != 6.3 ]; then
+            echo "::error::$app has Swift $version. The package needs Swift 6.3 or newer."
+            exit 1
+          fi
+          echo "version=$(xcodebuild -version | awk 'NR == 1 { v = $2 } NR == 2 { b = $3 } END { print v "-" b }')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the SwiftPM cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+            .build
+          key: ${{ runner.os }}-swiftpm-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+
+      - name: Build the package and its tests
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          start=$(date +%s)
+          swift build --build-tests
+          seconds=$(( $(date +%s) - start ))
+          echo "swift build --build-tests took $(( seconds / 60 )) min $(( seconds % 60 )) s."
+          echo "Build wall time: $(( seconds / 60 )) min $(( seconds % 60 )) s. Cache hit: ${CACHE_HIT:-false}." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the SwiftPM cache
+        # Save on pushes to main only. Pull requests read the cache from main.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+            .build
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Build the full Metal library
+        # A SwiftPM command-line build compiles no Metal kernels, so the tests find no metallib.
+        run: scripts/build-metallib.sh
+
+      - name: Run the tests
+        env:
+          # MLX reads this flag once, when it opens the Metal device. It turns on the sorted expert-tile route for the whole test run.
+          # Today only the allow-listed shapes in SortedGatherQuantizedMMTests take that route.
+          # Without the flag, five tests in that suite skip.
+          MLX_GATHER_QMM_EXPERT_SLICES: "1"
+        run: |
+          swift test --skip-build 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          # XCTest prints a summary line for each suite. The last line covers the whole run.
+          summary=$(grep -E 'Executed [0-9]+ tests?, with' "$RUNNER_TEMP/swift-test.log" | tail -n 1 || true)
+          echo "Test summary: $summary" >> "$GITHUB_STEP_SUMMARY"
+          if ! echo "$summary" | grep -Eq 'Executed [1-9][0-9]* tests?, with'; then
+            echo "::error::The test run executed zero tests."
+            exit 1
+          fi
+          # XCTest counts a skipped test as executed. Fail on any skip outside the opt-in perf suite.
+          unexpected=$(grep -E "^Test Case '.*' skipped \(" "$RUNNER_TEMP/swift-test.log" | grep -v QwenExpertTilePerfTests || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::Unexpected skipped tests:"
+            echo "$unexpected"
+            exit 1
+          fi

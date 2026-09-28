@@ -188,9 +188,11 @@ def:
       description: |
         The gate that keeps this page honest: `check_forkdiff.py` fails CI when `base.hash`
         is not the merge-base with upstream, or when a file the fork changes is not described
-        by a section above.
+        by a section above. `build-metallib.sh` builds the full MLX Metal library for the
+        fork's test run in CI, because a SwiftPM command-line build compiles no Metal kernels.
       globs:
         - "scripts/check_forkdiff.py"
+        - "scripts/build-metallib.sh"
         - "FORKDIFF.md"
         - "README.md"
 

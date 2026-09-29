@@ -184,7 +184,7 @@ jobs:
             cat "$RUNNER_TEMP/coverage-rows.md"
             echo
             echo "The denominator is the host Swift code under \`Source/MLX*\` that the test binary links: $lines_total lines. It leaves out \`Tests/\` and the dependencies in \`.build/\`."
-            echo "SwiftPM compiles the Cmlx C and C++ core without instrumentation, and the test bundle does not link MLXFast, MLXFFT, MLXLinalg and MLXRandom, so these are not measured. Metal shader code is outside every coverage tool."
+            echo "SwiftPM compiles the Cmlx C and C++ core without instrumentation, so it is not measured. The test bundle does not link MLXFast, MLXFFT, MLXLinalg and MLXRandom. These are deprecated shims that forward to APIs in \`Source/MLX\` (MLXFast.swift, FFT.swift, Linalg.swift, Random.swift), and those APIs are measured in the \`Source/MLX\` row. Metal shader code is outside every coverage tool."
             echo "Swift emits no branch counters, so the Regions column is the proxy for branch coverage. The 80% target is reported only. The job does not fail below it."
           } >> "$GITHUB_STEP_SUMMARY"
 

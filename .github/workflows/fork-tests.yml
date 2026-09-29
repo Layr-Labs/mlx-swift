@@ -109,18 +109,83 @@ jobs:
           fi
 
       - name: Report line coverage
+        # Counts the Swift sources under Source/MLX* only. The target is 80% line coverage. It is reported, not enforced.
         run: |
           bin=$(swift build --show-bin-path)
-          xcrun llvm-cov report "$bin/mlx-swiftPackageTests.xctest/Contents/MacOS/mlx-swiftPackageTests" \
-            -instr-profile "$bin/codecov/default.profdata" \
-            -ignore-filename-regex '/Tests/|/\.build/' > "$RUNNER_TEMP/coverage-report.txt"
-          total=$(awk '$1 == "TOTAL"' "$RUNNER_TEMP/coverage-report.txt")
-          echo "$total"
-          # Field 10 of the TOTAL line is the line coverage percent.
+          binary="$bin/mlx-swiftPackageTests.xctest/Contents/MacOS/mlx-swiftPackageTests"
+          profile="$bin/codecov/default.profdata"
+          # report FILE DIR... writes the llvm-cov report for the Swift files under the directories.
+          # llvm-cov ignores a path that does not exist and then reports every file, so the function checks each path first.
+          report() {
+            out=$1
+            shift
+            paths=()
+            for dir in "$@"; do
+              if [ ! -d "$GITHUB_WORKSPACE/$dir" ]; then
+                echo "::error::The directory $dir does not exist."
+                return 1
+              fi
+              paths+=("$GITHUB_WORKSPACE/$dir")
+            done
+            xcrun llvm-cov report "$binary" -instr-profile "$profile" \
+              -ignore-filename-regex '/Tests/|/\.build/' "${paths[@]}" > "$out"
+          }
+          # value_of FILE NAME prints the value of the column NAME in the TOTAL row, for example "Lines" (a count) or "Lines Cover" (a percentage).
+          # It finds the column by its name in the header row, and it fails when the value is missing.
+          value_of() {
+            awk -v want="$2" '
+              NR == 1 {
+                field = 1
+                for (i = 2; i <= NF; i++) {
+                  if ($i == "Missed") { missed = 1; continue }
+                  field++
+                  if (missed) { missed = 0; continue }
+                  if ($i == "Cover" || $i == "Executed") {
+                    if (group " Cover" == want) col = field
+                    continue
+                  }
+                  group = $i
+                  if (group == want) col = field
+                }
+              }
+              $1 == "TOTAL" && col { value = $col }
+              END {
+                if (want ~ / Cover$/ && value !~ /^[0-9.]+%$/) exit 1
+                if (want !~ / Cover$/ && value !~ /^[0-9]+$/) exit 1
+                print value
+              }
+            ' "$1" || { echo "::error::$1 has no $2 value in the TOTAL row." >&2; return 1; }
+          }
+          # row NAME FILE DIR... adds one table row.
+          row() {
+            name=$1
+            out=$2
+            shift 2
+            report "$out" "$@"
+            grep '^TOTAL' "$out"
+            lines=$(value_of "$out" "Lines Cover")
+            regions=$(value_of "$out" "Regions Cover")
+            functions=$(value_of "$out" "Functions Cover")
+            echo "| $name | $lines | $regions | $functions | 80% |" >> "$RUNNER_TEMP/coverage-rows.md"
+          }
+          : > "$RUNNER_TEMP/coverage-rows.md"
+          cd "$GITHUB_WORKSPACE"
+          sources=(Source/MLX*)
+          row "All of \`Source/MLX*\`" "$RUNNER_TEMP/coverage-report.txt" "${sources[@]}"
+          for target in MLX MLXNN MLXOptimizers; do
+            row "\`Source/$target\`" "$RUNNER_TEMP/coverage-$target.txt" "Source/$target"
+          done
+          lines_total=$(value_of "$RUNNER_TEMP/coverage-report.txt" Lines)
           {
-            echo "| Component | Line coverage |"
-            echo "|---|---|"
-            echo "| All sources except Tests and .build | $(echo "$total" | awk '{ print $10 }') |"
+            echo "### Line coverage"
+            echo
+            echo "| Component | Lines | Regions | Functions | Target |"
+            echo "|---|---|---|---|---|"
+            cat "$RUNNER_TEMP/coverage-rows.md"
+            echo
+            echo "The denominator is the host Swift code under \`Source/MLX*\` that the test binary links: $lines_total lines. It leaves out \`Tests/\` and the dependencies in \`.build/\`."
+            echo "SwiftPM compiles the Cmlx C and C++ core without instrumentation, and the test bundle does not link MLXFast, MLXFFT, MLXLinalg and MLXRandom, so these are not measured. Metal shader code is outside every coverage tool."
+            echo "Swift emits no branch counters, so the Regions column is the proxy for branch coverage. The 80% target is reported only. The job does not fail below it."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the coverage report

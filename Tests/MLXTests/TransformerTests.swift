@@ -247,19 +247,25 @@ class TransformerTests: XCTestCase {
 
     /// With a causal target mask, a change to the last target position leaves
     /// the earlier outputs as they were. A change to the source changes all outputs.
+    /// The changes are random, not one constant: LayerNorm removes a constant added
+    /// to all features, so a constant change would not show in the pre-norm layers.
     func testTransformerTargetMaskIsCausal() {
         let source = normal([1, 3, 8], seed: 17)
         let target = normal([1, 4, 8], seed: 18)
-        let changedTarget = concatenated([target[0..., ..<3], target[0..., 3...] + 2], axis: 1)
+        let changedTarget = concatenated(
+            [target[0..., ..<3], target[0..., 3...] + normal([1, 1, 8], seed: 20)], axis: 1)
+        let changedSource = source + normal([1, 3, 8], seed: 21)
         for normFirst in [true, false] {
             let t = makeTransformer(seed: 19, normFirst: normFirst)
             let a = run(t, Inputs(source: source, target: target))
             let b = run(t, Inputs(source: source, target: changedTarget))
             assertClose(a[0..., ..<3], b[0..., ..<3], "normFirst: \(normFirst)")
-            XCTAssertFalse(a[0..., 3].allClose(b[0..., 3]).item(Bool.self))
+            XCTAssertFalse(
+                a[0..., 3].allClose(b[0..., 3]).item(Bool.self), "normFirst: \(normFirst)")
 
-            let c = run(t, Inputs(source: source + 2, target: target))
-            XCTAssertFalse(a[0..., 0].allClose(c[0..., 0]).item(Bool.self))
+            let c = run(t, Inputs(source: changedSource, target: target))
+            XCTAssertFalse(
+                a[0..., 0].allClose(c[0..., 0]).item(Bool.self), "normFirst: \(normFirst)")
         }
     }
 }

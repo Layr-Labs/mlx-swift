@@ -182,6 +182,8 @@ def:
         allocation footprint and resource counts, constant-cast cache invalidation, EvalProbe,
         GPT-OSS MXFP4 decode-tail and kernel correctness, quantized bias accumulation, the
         Qwen E=256 expert-tile route (performance-shaped), and sorted-gather quantized matmul.
+        `TransformerTests` and `RecurrentTests` cover the upstream Transformer, RNN, GRU and LSTM
+        layers, which had no tests, against references built from plain ops.
       globs:
         - "Tests/MLXTests/*.swift"
     - title: "Fork tooling"

@@ -176,6 +176,14 @@ def:
           globs:
             - "Source/MLX/FFT.swift"
             - "Source/MLX/IO.swift"
+        - title: "Transformer: post-norm decoder cross-attention queries"
+          description: |
+            In the post-norm `TransformerDecoderLayer` (`normFirst: false`), the cross attention
+            took its queries from the self-attention output before the residual sum and `ln1`.
+            It now takes them from the normalized sum `x`, as upstream MLX does.
+            `TransformerDecoderLayerTests` covers it.
+          globs:
+            - "Source/MLXNN/Transformer.swift"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:

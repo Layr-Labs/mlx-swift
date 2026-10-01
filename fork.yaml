@@ -136,6 +136,13 @@ def:
             fallbacks) can be measured at engine-idle boundaries without an mlx-c release.
           globs:
             - "Source/MLX/GPU+Metal.swift"
+        - title: "Ops: roll over more than one axis"
+          description: |
+            `roll(_:shift:axes:)` passed one shift value for all the axes, and MLX raised an error
+            when there were two or more axes. It now passes the shift once for each axis, as Python
+            `mx.roll` does for an integer shift. `RollMultipleAxesTests` covers it.
+          globs:
+            - "Source/MLX/Ops.swift"
         - title: "Quantized constant reuse"
           description: |
             Quantized inference rebuilt BF16→FP32 conversions of unchanged scales, offsets and

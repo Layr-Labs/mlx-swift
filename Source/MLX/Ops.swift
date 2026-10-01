@@ -2592,7 +2592,11 @@ public func roll(
 {
     var result = mlx_array_new()
     if let axes {
-        mlx_roll_axes(&result, a.ctx, [shift.int32], 1, axes.asInt32, axes.count, stream.ctx)
+        // MLX needs one shift value for each axis. Use the same shift for each axis,
+        // as Python MLX does for an integer shift.
+        let shifts = [Int32](repeating: shift.int32, count: axes.count)
+        mlx_roll_axes(
+            &result, a.ctx, shifts, shifts.count, axes.asInt32, axes.count, stream.ctx)
     } else {
         mlx_roll(&result, a.ctx, [shift.int32], 1, stream.ctx)
     }

@@ -2029,7 +2029,9 @@ public func median(
     stream: StreamOrDevice = .default
 ) -> MLXArray {
     var result = mlx_array_new()
-    mlx_median(&result, a.ctx, nil, 0, keepDims, stream.ctx)
+    // mlx_median takes the axes to reduce; pass all of them, as Python MLX does.
+    let axes = (0 ..< a.ndim).map { Int32($0) }
+    mlx_median(&result, a.ctx, axes, axes.count, keepDims, stream.ctx)
     return MLXArray(result)
 }
 

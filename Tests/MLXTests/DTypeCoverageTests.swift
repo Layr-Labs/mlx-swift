@@ -290,7 +290,7 @@ class DTypeCoverageTests: XCTestCase {
         // through binary operations between two arrays. The CPU stream is
         // used because MLX does not allow float64 on the GPU.
         func promoted(_ a: DType, _ b: DType) -> DType {
-            add(
+            MLX.add(
                 MLXArray.zeros([1], dtype: a, stream: .cpu),
                 MLXArray.zeros([1], dtype: b, stream: .cpu), stream: .cpu
             ).dtype

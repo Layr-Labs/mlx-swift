@@ -72,15 +72,16 @@ class OpsCoverageTests: XCTestCase {
     // MARK: - Arithmetic
 
     func testAddSubtractMultiplyDivide() {
+        // XCTestCase has an add(_:) method, so the MLX free function needs the module name.
         let a = opsF([1, 2, 3])
         let b = opsF([4, 5, 6])
 
-        let sum = add(a, b)
+        let sum = MLX.add(a, b)
         XCTAssertEqual(sum.dtype, .float32)
         XCTAssertEqual(sum.asArray(Float.self), [5, 7, 9])
 
         // both scalars: the result is an int32 array
-        let scalarSum = add(1, 2)
+        let scalarSum = MLX.add(1, 2)
         XCTAssertEqual(scalarSum.dtype, .int32)
         XCTAssertEqual(scalarSum.item(Int32.self), 3)
 

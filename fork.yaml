@@ -176,6 +176,13 @@ def:
           globs:
             - "Source/MLX/FFT.swift"
             - "Source/MLX/IO.swift"
+        - title: "Ops: nanToNum defaults"
+          description: |
+            `nanToNum` gave `posInf` and `negInf` a default of 0, so infinities became 0. The doc
+            comment and Python `mx.nan_to_num` use the largest finite value of the dtype. The
+            defaults are now `nil`, which gives that value. `NanToNumDefaultsTests` covers it.
+          globs:
+            - "Source/MLX/Ops.swift"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:

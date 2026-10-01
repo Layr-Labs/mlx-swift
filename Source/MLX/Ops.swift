@@ -2099,7 +2099,7 @@ public func multiply(
 /// - <doc:arithmetic>
 public func nanToNum(
     _ array: MLXArray,
-    nan: Float = 0, posInf: Float? = 0, negInf: Float? = 0,
+    nan: Float = 0, posInf: Float? = nil, negInf: Float? = nil,
     stream: StreamOrDevice = .default
 ) -> MLXArray {
     let posInf = mlx_optional_float(value: posInf ?? 0, has_value: posInf != nil)

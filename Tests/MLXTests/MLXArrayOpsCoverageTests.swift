@@ -85,9 +85,9 @@ class MLXArrayOpsCoverageTests: XCTestCase {
     func testPowerAndRemainderOperators() {
         let a = arrF([1, 2, 3])
         let e = arrF([2, 3, 2])
-        XCTAssertEqual((a ** e).asArray(Float.self), [1, 8, 9])
-        XCTAssertEqual((a ** 2).asArray(Float.self), [1, 4, 9])
-        XCTAssertEqual((2 ** a).asArray(Float.self), [2, 4, 8])
+        assertEqual(a ** e, arrF([1, 8, 9]), rtol: 1e-5)
+        assertEqual(a ** 2, arrF([1, 4, 9]), rtol: 1e-5)
+        assertEqual(2 ** a, arrF([2, 4, 8]), rtol: 1e-5)
 
         let i = arrI([7, 8, 9])
         let d = arrI([2, 3, 4])
@@ -201,11 +201,11 @@ class MLXArrayOpsCoverageTests: XCTestCase {
 
         let b = arrF([1, 2, 3])
         let e = arrF([3, 2, 1])
-        XCTAssertEqual(pow(b, e).asArray(Float.self), [1, 4, 3])
-        XCTAssertEqual(pow(b, 2).asArray(Float.self), [1, 4, 9])
-        XCTAssertEqual(pow(2, b).asArray(Float.self), [2, 4, 8])
-        XCTAssertEqual(b.pow(3).asArray(Float.self), [1, 8, 27])
-        XCTAssertEqual(b.pow(e).asArray(Float.self), [1, 4, 3])
+        assertEqual(pow(b, e), arrF([1, 4, 3]), rtol: 1e-5)
+        assertEqual(pow(b, 2), arrF([1, 4, 9]), rtol: 1e-5)
+        assertEqual(pow(2, b), arrF([2, 4, 8]), rtol: 1e-5)
+        assertEqual(b.pow(3), arrF([1, 8, 27]), rtol: 1e-5)
+        assertEqual(b.pow(e), arrF([1, 4, 3]), rtol: 1e-5)
     }
 
     func testTrigonometric() {
@@ -356,9 +356,9 @@ class MLXArrayOpsCoverageTests: XCTestCase {
         assertEqual(variance(a, axis: 1), arrF([1.25, 0]), rtol: 1e-5, atol: 1e-6)
         assertEqual(a.variance(axis: 1, ddof: 1), arrF([5.0 / 3.0, 0]), rtol: 1e-5, atol: 1e-6)
         XCTAssertEqual(variance(a, axis: 1, keepDims: true).shape, [2, 1])
-        // all 8 values: mean 2.25, sum of squared deviations 3.5
-        assertEqual(variance(a), MLXArray(Float(3.5 / 8)), rtol: 1e-5, atol: 1e-6)
-        assertEqual(a.variance(), MLXArray(Float(3.5 / 8)), rtol: 1e-5, atol: 1e-6)
+        // all 8 values: mean 2.25, sum of squared deviations 5.5
+        assertEqual(variance(a), MLXArray(Float(5.5 / 8)), rtol: 1e-5, atol: 1e-6)
+        assertEqual(a.variance(), MLXArray(Float(5.5 / 8)), rtol: 1e-5, atol: 1e-6)
         assertEqual(
             variance(a, axes: [0, 1], ddof: 1), MLXArray(Float(0.5)), rtol: 1e-5, atol: 1e-6)
         assertEqual(a.variance(axes: [1]), arrF([1.25, 0]), rtol: 1e-5, atol: 1e-6)

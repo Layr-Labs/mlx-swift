@@ -608,13 +608,13 @@ class OpsCoverageTests: XCTestCase {
         assertEqual(s2, opsF([Foundation.sqrt(5.0 / 3.0), 0], [2, 1]), rtol: 1e-5, atol: 1e-6)
 
         let s3 = std(a, axes: [0, 1])
-        // all 8 values: mean 2.25, sum of squared deviations 3.5
-        assertEqual(s3, MLXArray(Foundation.sqrt(Float(3.5 / 8))), rtol: 1e-5, atol: 1e-6)
+        // all 8 values: mean 2.25, sum of squared deviations 5.5
+        assertEqual(s3, MLXArray(Foundation.sqrt(Float(5.5 / 8))), rtol: 1e-5, atol: 1e-6)
 
         let s4 = std(a)
-        assertEqual(s4, MLXArray(Foundation.sqrt(Float(3.5 / 8))), rtol: 1e-5, atol: 1e-6)
+        assertEqual(s4, MLXArray(Foundation.sqrt(Float(5.5 / 8))), rtol: 1e-5, atol: 1e-6)
         let s5 = std(a, ddof: 1)
-        assertEqual(s5, MLXArray(Foundation.sqrt(Float(3.5 / 7))), rtol: 1e-5, atol: 1e-6)
+        assertEqual(s5, MLXArray(Foundation.sqrt(Float(5.5 / 7))), rtol: 1e-5, atol: 1e-6)
     }
 
     func testTrace() {

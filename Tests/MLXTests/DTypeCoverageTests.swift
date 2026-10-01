@@ -17,9 +17,11 @@ class DTypeCoverageTests: XCTestCase {
     // MARK: - DType properties
 
     func testDTypeRoundTripThroughArrays() {
-        // DType -> mlx_dtype -> DType for every case
+        // DType -> mlx_dtype -> DType for every case. The CPU stream is used
+        // because MLX does not allow float64 on the GPU.
         for dtype in DType.allCases {
-            XCTAssertEqual(MLXArray.zeros([1], dtype: dtype).dtype, dtype, "\(dtype)")
+            XCTAssertEqual(
+                MLXArray.zeros([1], dtype: dtype, stream: .cpu).dtype, dtype, "\(dtype)")
         }
         XCTAssertEqual(DType.allCases.count, 14)
     }
@@ -285,9 +287,13 @@ class DTypeCoverageTests: XCTestCase {
 
     func testArrayArrayPromotion() {
         // The MLX promotion rules (mlx/dtype.cpp, promote_types), checked
-        // through binary operations between two arrays.
+        // through binary operations between two arrays. The CPU stream is
+        // used because MLX does not allow float64 on the GPU.
         func promoted(_ a: DType, _ b: DType) -> DType {
-            (MLXArray.zeros([1], dtype: a) + MLXArray.zeros([1], dtype: b)).dtype
+            add(
+                MLXArray.zeros([1], dtype: a, stream: .cpu),
+                MLXArray.zeros([1], dtype: b, stream: .cpu), stream: .cpu
+            ).dtype
         }
 
         XCTAssertEqual(promoted(.bool, .bool), .bool)

@@ -20,6 +20,12 @@ private func eluRef(_ x: Float, _ alpha: Float) -> Float {
     x > 0 ? x : alpha * (exp(x) - 1)
 }
 
+private func softmaxRef(_ v: [Float]) -> [Float] {
+    let e = v.map { exp($0) }
+    let s = e.reduce(0, +)
+    return e.map { $0 / s }
+}
+
 /// Tests for each activation in MLXNN/Activations.swift: the free function and
 /// the Module class. Each result is compared with a plain Swift formula.
 class ActivationCoverageTests: XCTestCase {
@@ -320,12 +326,6 @@ class ActivationCoverageTests: XCTestCase {
     // MARK: - Softmax family
 
     private let matrix: [[Float]] = [[1, 2, 3], [-1, 0, 4]]
-
-    private func softmaxRef(_ v: [Float]) -> [Float] {
-        let e = v.map { exp($0) }
-        let s = e.reduce(0, +)
-        return e.map { $0 / s }
-    }
 
     /// Apply `f` to each row (axis -1) or each column (axis 0) of `matrix`.
     private func applyRef(axis: Int, _ f: ([Float]) -> [Float]) -> [Float] {

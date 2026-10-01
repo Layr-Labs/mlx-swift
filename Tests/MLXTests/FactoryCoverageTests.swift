@@ -183,10 +183,11 @@ class FactoryCoverageTests: XCTestCase {
         XCTAssertEqual(b.dtype, .float32)
         XCTAssertEqual(b.asArray(Float.self), [0, 0.25, 0.5, 0.75, 1])
 
-        // the default count is 50
+        // the default count is 50. The GPU computes the values in float32,
+        // so a few of them are off by one or two ulp.
         let c = MLXArray.linspace(Float(0), Float(49))
         XCTAssertEqual(c.shape, [50])
-        XCTAssertEqual(c.asArray(Float.self), (0 ..< 50).map { Float($0) })
+        assertEqual(c, MLXArray((0 ..< 50).map { Float($0) }), atol: 1e-5)
 
         // free functions
         let d = MLX.linspace(Int16(-4), Int16(4), count: 3)

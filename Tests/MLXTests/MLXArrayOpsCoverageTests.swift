@@ -360,7 +360,7 @@ class MLXArrayOpsCoverageTests: XCTestCase {
         assertEqual(variance(a), MLXArray(Float(5.5 / 8)), rtol: 1e-5, atol: 1e-6)
         assertEqual(a.variance(), MLXArray(Float(5.5 / 8)), rtol: 1e-5, atol: 1e-6)
         assertEqual(
-            variance(a, axes: [0, 1], ddof: 1), MLXArray(Float(0.5)), rtol: 1e-5, atol: 1e-6)
+            variance(a, axes: [0, 1], ddof: 1), MLXArray(Float(5.5 / 7)), rtol: 1e-5, atol: 1e-6)
         assertEqual(a.variance(axes: [1]), arrF([1.25, 0]), rtol: 1e-5, atol: 1e-6)
         XCTAssertEqual(variance(a, keepDims: true).shape, [1, 1])
     }

@@ -185,6 +185,10 @@ def:
         `CustomFunctionTests`, `ConvolutionTransposedTests` and `CacheTests` cover custom
         functions with a custom VJP, the transposed convolution layers and the MLXNN cache, which
         had no tests.
+        `TransformerTests` and `RecurrentTests` cover the upstream Transformer, RNN, GRU and LSTM
+        layers, which had no tests, against references built from plain ops.
+        `CompileOverloadsTests` covers the typed `compile` overloads, which had no tests: each
+        compiled result must equal the uncompiled result, and a second call must not trace again.
       globs:
         - "Tests/MLXTests/*.swift"
     - title: "Fork tooling"

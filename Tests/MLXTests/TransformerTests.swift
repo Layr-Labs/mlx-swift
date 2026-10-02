@@ -185,12 +185,7 @@ class TransformerTests: XCTestCase {
                 var h = layer.ln1(x + selfAttend(x))
                 h = layer.ln2(h + crossAttend(h))
                 let expected = layer.ln3(h + mlp(h))
-                // Defect: Transformer.swift:272 passes y (the self-attention output
-                // before the residual sum and ln1) as the cross-attention queries,
-                // not x. Upstream MLX passes x.
-                XCTExpectFailure("post-norm decoder layer uses the wrong cross-attention queries") {
-                    assertClose(y, expected, "normFirst: false")
-                }
+                assertClose(y, expected, "normFirst: false")
             }
         }
     }

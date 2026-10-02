@@ -274,7 +274,7 @@ class TransformerDecoderLayer: Module {
             y = dropout1(y)
             x = ln1(x + y)
 
-            y = crossAttention(y, keys: memory, values: memory, mask: memoryMask)
+            y = crossAttention(x, keys: memory, values: memory, mask: memoryMask)
             y = dropout2(y)
             x = ln2(x + y)
 

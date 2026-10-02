@@ -134,7 +134,7 @@ public enum DType: Hashable, Sendable, CaseIterable {
             #endif
             case .float32: Double(Float.ulpOfOne)
             case .bfloat16: 0.0078125
-            case .complex64: Double.ulpOfOne
+            case .complex64: Double(Float.ulpOfOne)
             case .float64: Double.ulpOfOne
             default:
                 fatalError("\(dtype) is not a floating point type")
@@ -151,7 +151,7 @@ public enum DType: Hashable, Sendable, CaseIterable {
             #endif
             case .float32: -Double(Float.greatestFiniteMagnitude)
             case .bfloat16: -3.3895313892515355e+38
-            case .complex64: -Double.greatestFiniteMagnitude
+            case .complex64: -Double(Float.greatestFiniteMagnitude)
             case .float64: -Double.greatestFiniteMagnitude
             default:
                 fatalError("\(dtype) is not a floating point type")
@@ -168,7 +168,7 @@ public enum DType: Hashable, Sendable, CaseIterable {
             #endif
             case .float32: Double(Float.greatestFiniteMagnitude)
             case .bfloat16: 3.3895313892515355e+38
-            case .complex64: Double.greatestFiniteMagnitude
+            case .complex64: Double(Float.greatestFiniteMagnitude)
             case .float64: Double.greatestFiniteMagnitude
             default:
                 fatalError("\(dtype) is not a floating point type")
@@ -185,7 +185,7 @@ public enum DType: Hashable, Sendable, CaseIterable {
             #endif
             case .float32: Double(Float.leastNormalMagnitude)
             case .bfloat16: 1.1754943508222875e-38
-            case .complex64: Double.leastNormalMagnitude
+            case .complex64: Double(Float.leastNormalMagnitude)
             case .float64: Double.leastNormalMagnitude
             default:
                 fatalError("\(dtype) is not a floating point type")
@@ -201,8 +201,8 @@ public enum DType: Hashable, Sendable, CaseIterable {
                 case .float16: 6e-08
             #endif
             case .float32: Double(Float.leastNonzeroMagnitude)
-            case .bfloat16: 1.1754943508222875e-38
-            case .complex64: Double.leastNonzeroMagnitude
+            case .bfloat16: 9.183549615799121e-41
+            case .complex64: Double(Float.leastNonzeroMagnitude)
             case .float64: Double.leastNonzeroMagnitude
             default:
                 fatalError("\(dtype) is not a floating point type")

@@ -100,13 +100,7 @@ class DTypeCoverageTests: XCTestCase {
         XCTAssertEqual(info.min, -(2 - pow(2.0, -7)) * pow(2.0, 127))
         XCTAssertEqual(info.smallestNormal, pow(2.0, -126))
 
-        // Defect: DType.swift:204 gives the smallest normal (2^-126) as the
-        // smallest subnormal. The doc comment defines it as the smallest
-        // positive value with a leading 0 bit in the mantissa, which for
-        // bfloat16 is 2^-126 * 2^-7 = 2^-133.
-        XCTExpectFailure("DType.swift:204 bfloat16 smallestSubnormal is the smallest normal") {
-            XCTAssertEqual(info.smallestSubnormal, pow(2.0, -133))
-        }
+        XCTAssertEqual(info.smallestSubnormal, pow(2.0, -133))
     }
 
     func testFInfoComplex64() throws {
@@ -115,15 +109,11 @@ class DTypeCoverageTests: XCTestCase {
         let info = try XCTUnwrap(DType.complex64.finfo)
         XCTAssertEqual(info.dtype, .complex64)
 
-        // Defect: DType.swift:137, 154, 171, 188 and 205 give complex64 the
-        // float64 limits, not the float32 limits.
-        XCTExpectFailure("DType.swift:137-205 complex64 finfo uses float64 limits") {
-            XCTAssertEqual(info.eps, pow(2.0, -23))
-            XCTAssertEqual(info.max, (2 - pow(2.0, -23)) * pow(2.0, 127))
-            XCTAssertEqual(info.min, -(2 - pow(2.0, -23)) * pow(2.0, 127))
-            XCTAssertEqual(info.smallestNormal, pow(2.0, -126))
-            XCTAssertEqual(info.smallestSubnormal, pow(2.0, -149))
-        }
+        XCTAssertEqual(info.eps, pow(2.0, -23))
+        XCTAssertEqual(info.max, (2 - pow(2.0, -23)) * pow(2.0, 127))
+        XCTAssertEqual(info.min, -(2 - pow(2.0, -23)) * pow(2.0, 127))
+        XCTAssertEqual(info.smallestNormal, pow(2.0, -126))
+        XCTAssertEqual(info.smallestSubnormal, pow(2.0, -149))
     }
 
     // MARK: - Codable

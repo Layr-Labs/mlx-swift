@@ -169,6 +169,14 @@ def:
           globs:
             - "Source/MLX/MLXFastKernel.swift"
             - "Source/MLXFast/MLXFastKernel.swift"
+        - title: "DType: finfo for complex64 and bfloat16"
+          description: |
+            `DType.finfo` gave complex64 the float64 limits. MLX gives complex64 the limits of
+            its float32 parts, and so does this fork now. The bfloat16 `smallestSubnormal` was the
+            smallest normal (2^-126); it is now 2^-133, the smallest positive value with a leading
+            0 bit in the mantissa, as the doc comment says. `DTypeFInfoTests` covers it.
+          globs:
+            - "Source/MLX/DType.swift"
         - title: "Upstream API drift absorbed"
           description: |
             `FFT` gains the `FFTNorm` parameter and `IO` follows the load/save signatures of

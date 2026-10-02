@@ -2108,14 +2108,14 @@ public func nanToNum(
 ) -> MLXArray {
     // The C++ default supports only float32, float16 and bfloat16 and throws for the
     // other types, so give float64 and complex64 an explicit value.
-    var posInf = posInf
-    var negInf = negInf
+    var pos = posInf
+    var neg = negInf
     if array.dtype == .float64 || array.dtype == .complex64 {
-        posInf = posInf ?? Float.greatestFiniteMagnitude
-        negInf = negInf ?? -Float.greatestFiniteMagnitude
+        pos = pos ?? Float.greatestFiniteMagnitude
+        neg = neg ?? -Float.greatestFiniteMagnitude
     }
-    let posInf = mlx_optional_float(value: posInf ?? 0, has_value: posInf != nil)
-    let negInf = mlx_optional_float(value: negInf ?? 0, has_value: negInf != nil)
+    let posInf = mlx_optional_float(value: pos ?? 0, has_value: pos != nil)
+    let negInf = mlx_optional_float(value: neg ?? 0, has_value: neg != nil)
     var result = mlx_array_new()
     mlx_nan_to_num(&result, array.ctx, nan, posInf, negInf, stream.ctx)
     return MLXArray(result)

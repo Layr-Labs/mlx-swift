@@ -180,7 +180,11 @@ def:
           description: |
             `nanToNum` gave `posInf` and `negInf` a default of 0, so infinities became 0. The doc
             comment and Python `mx.nan_to_num` use the largest finite value of the dtype. The
-            defaults are now `nil`, which gives that value. `NanToNumDefaultsTests` covers it.
+            defaults are now `nil`, which gives that value. The C++ default supports only
+            float32, float16 and bfloat16 and throws for other types, so for `float64` and
+            `complex64` the Swift function passes the largest finite `Float` explicitly. The
+            values are `Float`, so for `float64` the default is 3.4028235e38, not the largest
+            finite `Double`. `NanToNumDefaultsTests` covers float32, float64 and complex64.
           globs:
             - "Source/MLX/Ops.swift"
     - title: "Tests"

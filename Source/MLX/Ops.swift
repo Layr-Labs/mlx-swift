@@ -2095,6 +2095,10 @@ public func multiply(
 ///     the negative of the largest finite value for the given dtype.
 ///   - stream: stream or device to evaluate on
 ///
+/// The values are `Float`. For `float64` the default is therefore the largest finite
+/// `Float` (3.4028235e38), not the largest finite `Double`. For `complex64` the default
+/// is the largest finite `Float`, and only `inf + 0i` and `-inf + 0i` are replaced.
+///
 /// ### See Also
 /// - <doc:arithmetic>
 public func nanToNum(
@@ -2102,6 +2106,14 @@ public func nanToNum(
     nan: Float = 0, posInf: Float? = nil, negInf: Float? = nil,
     stream: StreamOrDevice = .default
 ) -> MLXArray {
+    // The C++ default supports only float32, float16 and bfloat16 and throws for the
+    // other types, so give float64 and complex64 an explicit value.
+    var posInf = posInf
+    var negInf = negInf
+    if array.dtype == .float64 || array.dtype == .complex64 {
+        posInf = posInf ?? Float.greatestFiniteMagnitude
+        negInf = negInf ?? -Float.greatestFiniteMagnitude
+    }
     let posInf = mlx_optional_float(value: posInf ?? 0, has_value: posInf != nil)
     let negInf = mlx_optional_float(value: negInf ?? 0, has_value: negInf != nil)
     var result = mlx_array_new()

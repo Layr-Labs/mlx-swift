@@ -86,11 +86,12 @@ class TransformerTests: XCTestCase {
     func testCausalMaskValues() {
         let mask = MultiHeadAttention.createAdditiveCausalMask(4)
         XCTAssertEqual(mask.dtype, .float32)
+        let blocked = Float(DType.float32.finfo!.min)
         let expected = MLXArray(
             [
-                0, -1e9, -1e9, -1e9,
-                0, 0, -1e9, -1e9,
-                0, 0, 0, -1e9,
+                0, blocked, blocked, blocked,
+                0, 0, blocked, blocked,
+                0, 0, 0, blocked,
                 0, 0, 0, 0,
             ] as [Float], [4, 4])
         XCTAssertTrue(mask.arrayEqual(expected).item(Bool.self), "\(mask)")
@@ -103,14 +104,9 @@ class TransformerTests: XCTestCase {
         let values = mask.asType(.float32)
         let indices = MLXArray(0 ..< 4)
         let blocked = expandedDimensions(indices, axis: 1) .< expandedDimensions(indices, axis: 0)
-        // Defect: Transformer.swift:112 multiplies the mask by -1e9 in the mask's own dtype.
-        // In float16, -1e9 is -inf, and 0 * -inf is NaN. So each allowed position holds NaN, not 0.
-        // Upstream MLX uses the smallest finite value of the dtype instead.
-        XCTExpectFailure("createAdditiveCausalMask puts NaN in allowed positions for float16") {
-            XCTAssertFalse(isNaN(values).any().item(Bool.self), "\(values)")
-            let ok = which(blocked, values .< -1e4, values .== 0)
-            XCTAssertTrue(ok.all().item(Bool.self), "\(values)")
-        }
+        XCTAssertFalse(isNaN(values).any().item(Bool.self), "\(values)")
+        let ok = which(blocked, values .< -1e4, values .== 0)
+        XCTAssertTrue(ok.all().item(Bool.self), "\(values)")
     }
 
     /// With the causal mask, output at position t does not depend on the input after t.

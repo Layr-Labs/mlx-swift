@@ -161,6 +161,14 @@ def:
             Adapted from PrismML-Eng/mlx-swift under its MIT attribution.
           globs:
             - "Source/MLXNN/Hadamard.swift"
+        - title: "Transformer: finite causal mask"
+          description: |
+            `MultiHeadAttention.createAdditiveCausalMask` multiplied the mask by -1e9 in the
+            mask's own dtype. In float16, -1e9 is -inf, and 0 * -inf is NaN, so each allowed
+            position held NaN. The mask now uses the smallest finite value of the dtype, as
+            upstream MLX does, so allowed positions are 0. `TransformerCausalMaskTests` covers it.
+          globs:
+            - "Source/MLXNN/Transformer.swift"
         - title: "Custom Metal kernels: mutable inputs"
           description: |
             Swift custom Metal kernels take a default-empty `mutableInputs` list, forwarded

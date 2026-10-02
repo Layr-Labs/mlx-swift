@@ -184,6 +184,8 @@ def:
         Qwen E=256 expert-tile route (performance-shaped), and sorted-gather quantized matmul.
         `TransformerTests` and `RecurrentTests` cover the upstream Transformer, RNN, GRU and LSTM
         layers, which had no tests, against references built from plain ops.
+        `CompileOverloadsTests` covers the typed `compile` overloads, which had no tests: each
+        compiled result must equal the uncompiled result, and a second call must not trace again.
       globs:
         - "Tests/MLXTests/*.swift"
     - title: "Fork tooling"

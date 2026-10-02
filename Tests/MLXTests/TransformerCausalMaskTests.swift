@@ -21,7 +21,9 @@ class TransformerCausalMaskTests: XCTestCase {
         let indices = MLXArray(0 ..< 4)
         let blocked = expandedDimensions(indices, axis: 1) .< expandedDimensions(indices, axis: 0)
         XCTAssertFalse(isNaN(values).any().item(Bool.self), "\(values)")
-        let ok = which(blocked, values .< -1e4, values .== 0)
+        // Blocked positions hold the most negative finite float16 value, -65504.
+        let float16Min: Float = -65504
+        let ok = which(blocked, values .== float16Min, values .== 0)
         XCTAssertTrue(ok.all().item(Bool.self), "\(values)")
     }
 }

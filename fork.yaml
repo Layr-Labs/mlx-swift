@@ -186,6 +186,16 @@ def:
         `ParameterTypesCoverageTests` and `ArrayAtCoverageTests` cover the linalg factorizations
         and norms, the random samplers, the array factories, `DType` and type promotion, the
         parameter types and the `.at[...]` update operations.
+        `OpsCoverageTests` and `MLXArrayOpsCoverageTests` call each free function, operator and
+        method in `Ops.swift`, `Ops+Array.swift` and `MLXArray+Ops.swift` on small arrays and
+        compare the results with values computed by hand or by plain Swift loops.
+        `CustomFunctionTests`, `ConvolutionTransposedTests` and `CacheTests` cover custom
+        functions with a custom VJP, the transposed convolution layers and the MLXNN cache, which
+        had no tests.
+        `TransformerTests` and `RecurrentTests` cover the upstream Transformer, RNN, GRU and LSTM
+        layers, which had no tests, against references built from plain ops.
+        `CompileOverloadsTests` covers the typed `compile` overloads, which had no tests: each
+        compiled result must equal the uncompiled result, and a second call must not trace again.
       globs:
         - "Tests/MLXTests/*.swift"
     - title: "Fork tooling"

@@ -151,6 +151,18 @@ def:
           globs:
             - "Source/MLX/ConstantArrayCastCache.swift"
             - "Source/MLXNN/Quantized.swift"
+        - title: "Linalg: free triInv passes upper"
+          description: |
+            The free function `triInv(_:upper:stream:)` did not pass `upper` on to
+            `MLXLinalg.triInv`, so it always read the lower triangle. It now passes it on, as
+            `MLXLinalg.triInv` and upstream MLX `linalg.tri_inv` do. The deprecated twin in the
+            `MLXLinalg` module (`Source/MLXLinalg/Linalg.swift`) had the same defect and now
+            also passes `upper`. `LinalgTriInvTests` and `LinalgDeprecatedTriInvTests` cover
+            both. The `MLXTests` target now depends on `MLXLinalg` (`Package.swift`) so that
+            the test can call the deprecated function.
+          globs:
+            - "Source/MLX/Linalg.swift"
+            - "Source/MLXLinalg/Linalg.swift"
         - title: "Bonsai packed signed-Hadamard layers"
           description: |
             Prism-compatible signed block-Hadamard transforms, packed affine

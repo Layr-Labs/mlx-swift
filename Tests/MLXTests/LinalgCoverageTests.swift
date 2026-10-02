@@ -251,12 +251,7 @@ class LinalgCoverageTests: XCTestCase {
         assertEqual(triInv(lower, stream: .cpu), lowerInv, atol: 1e-6)
         assertEqual(matmul(upper, upperInv), MLXArray.eye(2), atol: 1e-6)
 
-        // Defect: the free function `triInv(_:upper:stream:)` at
-        // Source/MLX/Linalg.swift:717 does not pass `upper` on to
-        // `MLXLinalg.triInv`, so it always reads the lower triangle.
-        XCTExpectFailure("Linalg.swift:717 free triInv drops the upper argument") {
-            assertEqual(triInv(upper, upper: true, stream: .cpu), upperInv, atol: 1e-6)
-        }
+        assertEqual(triInv(upper, upper: true, stream: .cpu), upperInv, atol: 1e-6)
     }
 
     func testCholesky() {

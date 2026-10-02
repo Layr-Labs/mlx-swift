@@ -182,6 +182,10 @@ def:
         allocation footprint and resource counts, constant-cast cache invalidation, EvalProbe,
         GPT-OSS MXFP4 decode-tail and kernel correctness, quantized bias accumulation, the
         Qwen E=256 expert-tile route (performance-shaped), and sorted-gather quantized matmul.
+        `ArrayAccessorTests`, `IndexingFormsTests`, `NestedStructureTests`, `EvalGradOverloadTests`,
+        `MemoryLimitTests` and `ErrorHandlerScopeTests` cover `MLXArray` reads and conversions, the
+        subscript forms, nested structures, the eval and grad overloads, the memory limits and the
+        scoped and global error handlers.
         `LossCoverageTests`, `ActivationCoverageTests`, `QuantizedLayerTests` and
         `UpsampleCoverageTests` cover each MLXNN loss, activation, quantized layer and upsample
         mode, compared with values from plain Swift loops.

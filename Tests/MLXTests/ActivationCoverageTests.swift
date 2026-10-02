@@ -370,12 +370,7 @@ class ActivationCoverageTests: XCTestCase {
     func testSoftmaxDeprecatedNames() {
         let x = MLXArray(matrix.flatMap { $0 }, [2, 3])
         let logRef: ([Float]) -> [Float] = { softmaxRef($0).map { log($0) } }
-        // Defect: Source/MLXNN/Activations.swift:574, the deprecated SoftMax calls
-        // softmax(x) with no axis, so it normalizes over all elements. It is renamed to
-        // Softmax, which (like Python nn.Softmax) uses the last axis.
-        XCTExpectFailure("SoftMax normalizes over all axes, Source/MLXNN/Activations.swift:574") {
-            check(SoftMax()(x), applyRef(axis: -1, softmaxRef), shape: [2, 3])
-        }
+        check(SoftMax()(x), applyRef(axis: -1, softmaxRef), shape: [2, 3])
         check(LogSoftMax()(x), applyRef(axis: -1, logRef), shape: [2, 3])
         check(MLXNN.logSoftMax(x), applyRef(axis: -1, logRef), shape: [2, 3])
         check(MLXNN.logSoftMax(x, axis: 0), applyRef(axis: 0, logRef), shape: [2, 3])

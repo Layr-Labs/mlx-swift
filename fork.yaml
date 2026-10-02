@@ -173,6 +173,13 @@ def:
             Adapted from PrismML-Eng/mlx-swift under its MIT attribution.
           globs:
             - "Source/MLXNN/Hadamard.swift"
+        - title: "Activations: deprecated SoftMax axis"
+          description: |
+            The deprecated `SoftMax` layer called `softmax(x)` with no axis, so it normalized
+            over all elements. It is renamed to `Softmax`, which uses the last axis, as Python
+            `nn.Softmax` does. `SoftMax` now uses the last axis too. `SoftMaxAxisTests` covers it.
+          globs:
+            - "Source/MLXNN/Activations.swift"
         - title: "Transformer: finite causal mask"
           description: |
             `MultiHeadAttention.createAdditiveCausalMask` multiplied the mask by -1e9 in the

@@ -182,6 +182,10 @@ def:
         allocation footprint and resource counts, constant-cast cache invalidation, EvalProbe,
         GPT-OSS MXFP4 decode-tail and kernel correctness, quantized bias accumulation, the
         Qwen E=256 expert-tile route (performance-shaped), and sorted-gather quantized matmul.
+        `LinalgCoverageTests`, `RandomCoverageTests`, `FactoryCoverageTests`, `DTypeCoverageTests`,
+        `ParameterTypesCoverageTests` and `ArrayAtCoverageTests` cover the linalg factorizations
+        and norms, the random samplers, the array factories, `DType` and type promotion, the
+        parameter types and the `.at[...]` update operations.
         `OpsCoverageTests` and `MLXArrayOpsCoverageTests` call each free function, operator and
         method in `Ops.swift`, `Ops+Array.swift` and `MLXArray+Ops.swift` on small arrays and
         compare the results with values computed by hand or by plain Swift loops.

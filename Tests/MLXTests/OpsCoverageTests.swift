@@ -390,23 +390,16 @@ class OpsCoverageTests: XCTestCase {
     }
 
     func testRollMultipleAxes() {
-        // Python MLX mx.roll(a, 1, axis=(0, 1)) applies the shift to each axis.
-        // The Swift wrapper passes one shift value for all the axes
-        // (Source/MLX/Ops.swift:2595), and MLX raises "[roll] At least one shift
-        // value per axis is required".
+        // Apply the same shift to each axis.
         let a = MLXArray(0 ..< 6, [2, 3])
-        XCTExpectFailure(
-            "roll(_:shift:axes:) passes one shift value for more than one axis (Source/MLX/Ops.swift:2595)"
-        ) {
-            do {
-                let r = try withError { () -> MLXArray in
-                    roll(a, shift: 1, axes: [0, 1])
-                }
-                XCTAssertEqual(r.shape, [2, 3])
-                XCTAssertEqual(r.asArray(Int32.self), [5, 3, 4, 2, 0, 1])
-            } catch {
-                XCTFail("roll over two axes raised an MLX error: \(error)")
+        do {
+            let r = try withError { () -> MLXArray in
+                roll(a, shift: 1, axes: [0, 1])
             }
+            XCTAssertEqual(r.shape, [2, 3])
+            XCTAssertEqual(r.asArray(Int32.self), [5, 3, 4, 2, 0, 1])
+        } catch {
+            XCTFail("roll over two axes raised an MLX error: \(error)")
         }
     }
 

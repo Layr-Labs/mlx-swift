@@ -571,28 +571,21 @@ class OpsCoverageTests: XCTestCase {
     }
 
     func testMedianAllAxes() {
-        // The doc comment says median(_:keepDims:) computes the median over the full
-        // array, as Python MLX mx.median(a) does. The Swift wrapper passes an empty
-        // axes list (Source/MLX/Ops.swift:2032), and MLX raises "[flatten] start_axis
-        // must be less than or equal to end_axis" for an array with 2 dimensions.
+        // With no axis argument, reduce over the full array.
         let a = opsF([3, 1, 2, 9, 7, 8, 4, 6, 5], [3, 3])
-        XCTExpectFailure(
-            "median(_:keepDims:) passes no axes to mlx_median (Source/MLX/Ops.swift:2032)"
-        ) {
-            do {
-                let m = try withError { () -> MLXArray in
-                    median(a)
-                }
-                XCTAssertEqual(m.shape, [])
-                XCTAssertEqual(m.item(Float.self), 5)
-
-                let k = try withError { () -> MLXArray in
-                    median(a, keepDims: true)
-                }
-                XCTAssertEqual(k.shape, [1, 1])
-            } catch {
-                XCTFail("median over all axes raised an MLX error: \(error)")
+        do {
+            let m = try withError { () -> MLXArray in
+                median(a)
             }
+            XCTAssertEqual(m.shape, [])
+            XCTAssertEqual(m.item(Float.self), 5)
+
+            let k = try withError { () -> MLXArray in
+                median(a, keepDims: true)
+            }
+            XCTAssertEqual(k.shape, [1, 1])
+        } catch {
+            XCTFail("median over all axes raised an MLX error: \(error)")
         }
     }
 

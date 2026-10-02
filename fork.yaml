@@ -137,6 +137,13 @@ def:
             - "Source/MLX/Transforms+Eval.swift"
             - "Source/MLX/Transforms+Compile.swift"
             - "Source/MLX/MLXArray.swift"
+        - title: "Ops: median over all axes"
+          description: |
+            `median(_:keepDims:)` passed no axes to `mlx_median`, and MLX raised an error for every
+            array with 1 or more dimensions (a 0-dimensional array worked). It now passes all the
+            axes, as Python `mx.median(a)` does. `MedianAllAxesTests` covers it.
+          globs:
+            - "Source/MLX/Ops.swift"
         - title: "GPU diagnostics: Gemma 4 expert-QMM route counters"
           description: |
             `GPU.Gemma4ExpertQMMDiagnostics` with snapshot / reset / arm / disarm wraps the fork's

@@ -1003,7 +1003,8 @@ public func convolve(
             padding = weightSize / 2
         } else {
             let padLeft = weightSize / 2
-            let padRight = max(0, padLeft / 2 - 1)
+            // The output length is max(len(a), len(b)), as in numpy and Python MLX.
+            let padRight = max(0, padLeft - 1)
 
             input = padded(input, widths: [0, [padLeft, padRight], 0], stream: stream)
         }
@@ -2029,7 +2030,9 @@ public func median(
     stream: StreamOrDevice = .default
 ) -> MLXArray {
     var result = mlx_array_new()
-    mlx_median(&result, a.ctx, nil, 0, keepDims, stream.ctx)
+    // mlx_median takes the axes to reduce; pass all of them, as Python MLX does.
+    let axes = (0 ..< a.ndim).map { Int32($0) }
+    mlx_median(&result, a.ctx, axes, axes.count, keepDims, stream.ctx)
     return MLXArray(result)
 }
 

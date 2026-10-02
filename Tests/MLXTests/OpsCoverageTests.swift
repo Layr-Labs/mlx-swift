@@ -166,21 +166,14 @@ class OpsCoverageTests: XCTestCase {
     }
 
     func testNanToNumDefaults() {
-        // The doc comment of nanToNum (Source/MLX/Ops.swift:2092) says that if posInf and
-        // negInf are not given, the largest finite value is used. Python MLX
-        // (nan_to_num, posinf=None) does the same. The Swift defaults are 0, so a call
-        // without them replaces +inf and -inf with 0.
+        // Omitted infinity replacements use the largest finite values.
         let special = opsF([Float.nan, Float.infinity, -Float.infinity, 1])
         let replaced = nanToNum(special)
         XCTAssertEqual(replaced.shape, [4])
         XCTAssertEqual(replaced[0].item(Float.self), 0)
         XCTAssertEqual(replaced[3].item(Float.self), 1)
-        XCTExpectFailure(
-            "nanToNum defaults posInf and negInf to 0, not to the largest finite value (Source/MLX/Ops.swift:2102)"
-        ) {
-            XCTAssertEqual(replaced[1].item(Float.self), Float.greatestFiniteMagnitude)
-            XCTAssertEqual(replaced[2].item(Float.self), -Float.greatestFiniteMagnitude)
-        }
+        XCTAssertEqual(replaced[1].item(Float.self), Float.greatestFiniteMagnitude)
+        XCTAssertEqual(replaced[2].item(Float.self), -Float.greatestFiniteMagnitude)
     }
 
     // MARK: - Trigonometric and other unary functions

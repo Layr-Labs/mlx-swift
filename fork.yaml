@@ -159,6 +159,18 @@ def:
           globs:
             - "Source/MLX/ConstantArrayCastCache.swift"
             - "Source/MLXNN/Quantized.swift"
+        - title: "Linalg: free triInv passes upper"
+          description: |
+            The free function `triInv(_:upper:stream:)` did not pass `upper` on to
+            `MLXLinalg.triInv`, so it always read the lower triangle. It now passes it on, as
+            `MLXLinalg.triInv` and upstream MLX `linalg.tri_inv` do. The deprecated twin in the
+            `MLXLinalg` module (`Source/MLXLinalg/Linalg.swift`) had the same defect and now
+            also passes `upper`. `LinalgTriInvTests` and `LinalgDeprecatedTriInvTests` cover
+            both. The `MLXTests` target now depends on `MLXLinalg` (`Package.swift`) so that
+            the test can call the deprecated function.
+          globs:
+            - "Source/MLX/Linalg.swift"
+            - "Source/MLXLinalg/Linalg.swift"
         - title: "Bonsai packed signed-Hadamard layers"
           description: |
             Prism-compatible signed block-Hadamard transforms, packed affine
@@ -169,6 +181,21 @@ def:
             Adapted from PrismML-Eng/mlx-swift under its MIT attribution.
           globs:
             - "Source/MLXNN/Hadamard.swift"
+        - title: "Activations: deprecated SoftMax axis"
+          description: |
+            The deprecated `SoftMax` layer called `softmax(x)` with no axis, so it normalized
+            over all elements. It is renamed to `Softmax`, which uses the last axis, as Python
+            `nn.Softmax` does. `SoftMax` now uses the last axis too. `SoftMaxAxisTests` covers it.
+          globs:
+            - "Source/MLXNN/Activations.swift"
+        - title: "Transformer: finite causal mask"
+          description: |
+            `MultiHeadAttention.createAdditiveCausalMask` multiplied the mask by -1e9 in the
+            mask's own dtype. In float16, -1e9 is -inf, and 0 * -inf is NaN, so each allowed
+            position held NaN. The mask now uses the smallest finite value of the dtype, as
+            upstream MLX does, so allowed positions are 0. `TransformerCausalMaskTests` covers it.
+          globs:
+            - "Source/MLXNN/Transformer.swift"
         - title: "Custom Metal kernels: mutable inputs"
           description: |
             Swift custom Metal kernels take a default-empty `mutableInputs` list, forwarded
@@ -177,6 +204,14 @@ def:
           globs:
             - "Source/MLX/MLXFastKernel.swift"
             - "Source/MLXFast/MLXFastKernel.swift"
+        - title: "DType: finfo for complex64 and bfloat16"
+          description: |
+            `DType.finfo` gave complex64 the float64 limits. MLX gives complex64 the limits of
+            its float32 parts, and so does this fork now. The bfloat16 `smallestSubnormal` was the
+            smallest normal (2^-126); it is now 2^-133, the smallest positive value with a leading
+            0 bit in the mantissa, as the doc comment says. `DTypeFInfoTests` covers it.
+          globs:
+            - "Source/MLX/DType.swift"
         - title: "Upstream API drift absorbed"
           description: |
             `FFT` gains the `FFTNorm` parameter and `IO` follows the load/save signatures of
@@ -184,12 +219,41 @@ def:
           globs:
             - "Source/MLX/FFT.swift"
             - "Source/MLX/IO.swift"
+        - title: "Transformer: post-norm decoder cross-attention queries"
+          description: |
+            In the post-norm `TransformerDecoderLayer` (`normFirst: false`), the cross attention
+            took its queries from the self-attention output before the residual sum and `ln1`.
+            It now takes them from the normalized sum `x`, as upstream MLX does.
+            `TransformerDecoderLayerTests` covers it.
+          globs:
+            - "Source/MLXNN/Transformer.swift"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:
         allocation footprint and resource counts, constant-cast cache invalidation, EvalProbe,
         GPT-OSS MXFP4 decode-tail and kernel correctness, quantized bias accumulation, the
         Qwen E=256 expert-tile route (performance-shaped), and sorted-gather quantized matmul.
+        `ArrayAccessorTests`, `IndexingFormsTests`, `NestedStructureTests`, `EvalGradOverloadTests`,
+        `MemoryLimitTests` and `ErrorHandlerScopeTests` cover `MLXArray` reads and conversions, the
+        subscript forms, nested structures, the eval and grad overloads, the memory limits and the
+        scoped and global error handlers.
+        `LossCoverageTests`, `ActivationCoverageTests`, `QuantizedLayerTests` and
+        `UpsampleCoverageTests` cover each MLXNN loss, activation, quantized layer and upsample
+        mode, compared with values from plain Swift loops.
+        `LinalgCoverageTests`, `RandomCoverageTests`, `FactoryCoverageTests`, `DTypeCoverageTests`,
+        `ParameterTypesCoverageTests` and `ArrayAtCoverageTests` cover the linalg factorizations
+        and norms, the random samplers, the array factories, `DType` and type promotion, the
+        parameter types and the `.at[...]` update operations.
+        `OpsCoverageTests` and `MLXArrayOpsCoverageTests` call each free function, operator and
+        method in `Ops.swift`, `Ops+Array.swift` and `MLXArray+Ops.swift` on small arrays and
+        compare the results with values computed by hand or by plain Swift loops.
+        `CustomFunctionTests`, `ConvolutionTransposedTests` and `CacheTests` cover custom
+        functions with a custom VJP, the transposed convolution layers and the MLXNN cache, which
+        had no tests.
+        `TransformerTests` and `RecurrentTests` cover the upstream Transformer, RNN, GRU and LSTM
+        layers, which had no tests, against references built from plain ops.
+        `CompileOverloadsTests` covers the typed `compile` overloads, which had no tests: each
+        compiled result must equal the uncompiled result, and a second call must not trace again.
       globs:
         - "Tests/MLXTests/*.swift"
     - title: "Fork tooling"

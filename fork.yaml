@@ -177,6 +177,14 @@ def:
           globs:
             - "Source/MLX/MLXFastKernel.swift"
             - "Source/MLXFast/MLXFastKernel.swift"
+        - title: "DType: finfo for complex64 and bfloat16"
+          description: |
+            `DType.finfo` gave complex64 the float64 limits. MLX gives complex64 the limits of
+            its float32 parts, and so does this fork now. The bfloat16 `smallestSubnormal` was the
+            smallest normal (2^-126); it is now 2^-133, the smallest positive value with a leading
+            0 bit in the mantissa, as the doc comment says. `DTypeFInfoTests` covers it.
+          globs:
+            - "Source/MLX/DType.swift"
         - title: "Upstream API drift absorbed"
           description: |
             `FFT` gains the `FFTNorm` parameter and `IO` follows the load/save signatures of
@@ -190,6 +198,27 @@ def:
         allocation footprint and resource counts, constant-cast cache invalidation, EvalProbe,
         GPT-OSS MXFP4 decode-tail and kernel correctness, quantized bias accumulation, the
         Qwen E=256 expert-tile route (performance-shaped), and sorted-gather quantized matmul.
+        `ArrayAccessorTests`, `IndexingFormsTests`, `NestedStructureTests`, `EvalGradOverloadTests`,
+        `MemoryLimitTests` and `ErrorHandlerScopeTests` cover `MLXArray` reads and conversions, the
+        subscript forms, nested structures, the eval and grad overloads, the memory limits and the
+        scoped and global error handlers.
+        `LossCoverageTests`, `ActivationCoverageTests`, `QuantizedLayerTests` and
+        `UpsampleCoverageTests` cover each MLXNN loss, activation, quantized layer and upsample
+        mode, compared with values from plain Swift loops.
+        `LinalgCoverageTests`, `RandomCoverageTests`, `FactoryCoverageTests`, `DTypeCoverageTests`,
+        `ParameterTypesCoverageTests` and `ArrayAtCoverageTests` cover the linalg factorizations
+        and norms, the random samplers, the array factories, `DType` and type promotion, the
+        parameter types and the `.at[...]` update operations.
+        `OpsCoverageTests` and `MLXArrayOpsCoverageTests` call each free function, operator and
+        method in `Ops.swift`, `Ops+Array.swift` and `MLXArray+Ops.swift` on small arrays and
+        compare the results with values computed by hand or by plain Swift loops.
+        `CustomFunctionTests`, `ConvolutionTransposedTests` and `CacheTests` cover custom
+        functions with a custom VJP, the transposed convolution layers and the MLXNN cache, which
+        had no tests.
+        `TransformerTests` and `RecurrentTests` cover the upstream Transformer, RNN, GRU and LSTM
+        layers, which had no tests, against references built from plain ops.
+        `CompileOverloadsTests` covers the typed `compile` overloads, which had no tests: each
+        compiled result must equal the uncompiled result, and a second call must not trace again.
       globs:
         - "Tests/MLXTests/*.swift"
     - title: "Fork tooling"

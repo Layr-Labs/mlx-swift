@@ -103,13 +103,18 @@ open class MultiHeadAttention: Module {
 
     /// Creates an attention mask for use with ``callAsFunction(_:keys:values:mask:)``
     ///
+    /// The mask is 0 where a position may attend and the most negative finite value
+    /// of `dtype` where it may not.
+    ///
     /// - Parameters:
     ///   - n: number of dimensions
     ///   - dtype: data type of the mask
     public static func createAdditiveCausalMask(_ n: Int, dtype: DType = .float32) -> MLXArray {
         let indices = MLXArray(0 ..< n)
         var mask = expandedDimensions(indices, axis: 1) .< expandedDimensions(indices, axis: 0)
-        mask = mask.asType(dtype) * -1e9
+        // A constant such as -1e9 is -inf in float16, and 0 * -inf is NaN.
+        // The smallest finite value of the dtype keeps 0 * value equal to 0.
+        mask = mask.asType(dtype) * (dtype.finfo?.min ?? -1e9)
         return mask
     }
 }

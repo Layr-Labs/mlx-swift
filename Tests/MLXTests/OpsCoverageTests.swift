@@ -951,11 +951,7 @@ class OpsCoverageTests: XCTestCase {
     }
 
     func testConvolveSameEvenKernel() {
-        // numpy.convolve(a, v, "same") and Python MLX give an output of length
-        // max(len(a), len(v)). For an even kernel, Python MLX pads the input with
-        // pad_l = size / 2 on the left and pad_r = pad_l - 1 on the right. The Swift
-        // code uses padLeft / 2 - 1 for the right side (Source/MLX/Ops.swift:1006),
-        // so a kernel of size 4 gives an output that is one element too short.
+        // Same mode keeps max(len(a), len(v)) values for an even kernel.
         let a: [Float] = [1, 2, 3, 4, 5]
         let k: [Float] = [1, 1, 1, 1]
         let full = opsFullConvolve(a, k)
@@ -963,13 +959,9 @@ class OpsCoverageTests: XCTestCase {
         XCTAssertEqual(expected, [3, 6, 10, 14, 12])
 
         let r = convolve(opsF(a), opsF(k), mode: .same)
-        XCTExpectFailure(
-            "convolve .same pads the right side with padLeft / 2 - 1, not padLeft - 1 (Source/MLX/Ops.swift:1006)"
-        ) {
-            XCTAssertEqual(r.shape, [5])
-            if r.shape == [5] {
-                XCTAssertEqual(r.asArray(Float.self), expected)
-            }
+        XCTAssertEqual(r.shape, [5])
+        if r.shape == [5] {
+            XCTAssertEqual(r.asArray(Float.self), expected)
         }
     }
 }

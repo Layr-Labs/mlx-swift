@@ -116,6 +116,14 @@ def:
           globs:
             - "Source/MLX/Stream.swift"
             - "Source/MLX/Device.swift"
+        - title: "Ops: convolve same mode with an even kernel"
+          description: |
+            `convolve(_:_:mode:)` with `.same` padded the right side of the input with
+            `padLeft / 2 - 1` values for an even kernel. A kernel of size 4 or more gave one value
+            too few. It now pads with `padLeft - 1`, as Python MLX does, so the output has
+            max(len(a), len(b)) values, as in numpy. `ConvolveSameModeTests` covers it.
+          globs:
+            - "Source/MLX/Ops.swift"
         - title: "EvalProbe and eval-lock ordering"
           description: |
             `EvalProbe` is measurement-only instrumentation bracketing the blocking `mlx_eval`

@@ -153,6 +153,16 @@ mlx_fast_metal_kernel mlx_fast_metal_kernel_new(
 
 void mlx_fast_metal_kernel_free(mlx_fast_metal_kernel cls);
 
+mlx_fast_metal_kernel mlx_fast_metal_kernel_new_mutable(
+    const char* name,
+    const mlx_vector_string input_names,
+    const mlx_vector_string output_names,
+    const char* source,
+    const char* header,
+    bool ensure_row_contiguous,
+    bool atomic_outputs,
+    const mlx_vector_string mutable_input_names);
+
 int mlx_fast_metal_kernel_apply(
     mlx_vector_array* outputs,
     mlx_fast_metal_kernel cls,

@@ -1003,7 +1003,8 @@ public func convolve(
             padding = weightSize / 2
         } else {
             let padLeft = weightSize / 2
-            let padRight = max(0, padLeft / 2 - 1)
+            // The output length is max(len(a), len(b)), as in numpy and Python MLX.
+            let padRight = max(0, padLeft - 1)
 
             input = padded(input, widths: [0, [padLeft, padRight], 0], stream: stream)
         }
@@ -2029,7 +2030,9 @@ public func median(
     stream: StreamOrDevice = .default
 ) -> MLXArray {
     var result = mlx_array_new()
-    mlx_median(&result, a.ctx, nil, 0, keepDims, stream.ctx)
+    // mlx_median takes the axes to reduce; pass all of them, as Python MLX does.
+    let axes = (0 ..< a.ndim).map { Int32($0) }
+    mlx_median(&result, a.ctx, axes, axes.count, keepDims, stream.ctx)
     return MLXArray(result)
 }
 
@@ -2095,15 +2098,27 @@ public func multiply(
 ///     the negative of the largest finite value for the given dtype.
 ///   - stream: stream or device to evaluate on
 ///
+/// The values are `Float`. For `float64` the default is therefore the largest finite
+/// `Float` (3.4028235e38), not the largest finite `Double`. For `complex64` the default
+/// is the largest finite `Float`, and only `inf + 0i` and `-inf + 0i` are replaced.
+///
 /// ### See Also
 /// - <doc:arithmetic>
 public func nanToNum(
     _ array: MLXArray,
-    nan: Float = 0, posInf: Float? = 0, negInf: Float? = 0,
+    nan: Float = 0, posInf: Float? = nil, negInf: Float? = nil,
     stream: StreamOrDevice = .default
 ) -> MLXArray {
-    let posInf = mlx_optional_float(value: posInf ?? 0, has_value: posInf != nil)
-    let negInf = mlx_optional_float(value: negInf ?? 0, has_value: negInf != nil)
+    // The C++ default supports only float32, float16 and bfloat16 and throws for the
+    // other types, so give float64 and complex64 an explicit value.
+    var pos = posInf
+    var neg = negInf
+    if array.dtype == .float64 || array.dtype == .complex64 {
+        pos = pos ?? Float.greatestFiniteMagnitude
+        neg = neg ?? -Float.greatestFiniteMagnitude
+    }
+    let posInf = mlx_optional_float(value: pos ?? 0, has_value: pos != nil)
+    let negInf = mlx_optional_float(value: neg ?? 0, has_value: neg != nil)
     var result = mlx_array_new()
     mlx_nan_to_num(&result, array.ctx, nan, posInf, negInf, stream.ctx)
     return MLXArray(result)
@@ -2592,7 +2607,11 @@ public func roll(
 {
     var result = mlx_array_new()
     if let axes {
-        mlx_roll_axes(&result, a.ctx, [shift.int32], 1, axes.asInt32, axes.count, stream.ctx)
+        // MLX needs one shift value for each axis. Use the same shift for each axis,
+        // as Python MLX does for an integer shift.
+        let shifts = [Int32](repeating: shift.int32, count: axes.count)
+        mlx_roll_axes(
+            &result, a.ctx, shifts, shifts.count, axes.asInt32, axes.count, stream.ctx)
     } else {
         mlx_roll(&result, a.ctx, [shift.int32], 1, stream.ctx)
     }

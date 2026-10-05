@@ -222,7 +222,7 @@ public func triInv(
     _ array: MLXArray, upper: Bool = false,
     stream: StreamOrDevice = .default
 ) -> MLXArray {
-    return MLXLinalg.triInv(array, stream: stream)
+    return MLXLinalg.triInv(array, upper: upper, stream: stream)
 }
 
 /// Compute the Cholesky decomposition of a real symmetric positive semi-definite matrix.

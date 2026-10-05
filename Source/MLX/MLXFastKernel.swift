@@ -50,7 +50,8 @@ extension DType: KernelTemplateArg {}
                 name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
                 source: String, header: String = "",
                 ensureRowContiguous: Bool = true,
-                atomicOutputs: Bool = false
+                atomicOutputs: Bool = false,
+                mutableInputs: [String] = []
             ) {
                 self.outputNames = Array(outputNames)
 
@@ -66,12 +67,22 @@ extension DType: KernelTemplateArg {}
                     mlx_vector_string_append_value(output_names, name)
                 }
 
-                self.kernel = mlx_fast_metal_kernel_new(
-                    name.cString(using: .utf8),
-                    input_names, output_names,
-                    source.cString(using: .utf8),
-                    header.cString(using: .utf8),
-                    ensureRowContiguous, atomicOutputs)
+                if mutableInputs.isEmpty {
+                    self.kernel = mlx_fast_metal_kernel_new(
+                        name.cString(using: .utf8), input_names, output_names,
+                        source.cString(using: .utf8), header.cString(using: .utf8),
+                        ensureRowContiguous, atomicOutputs)
+                } else {
+                    let mutable_names = mlx_vector_string_new()
+                    defer { mlx_vector_string_free(mutable_names) }
+                    for name in mutableInputs {
+                        mlx_vector_string_append_value(mutable_names, name)
+                    }
+                    self.kernel = mlx_fast_metal_kernel_new_mutable(
+                        name.cString(using: .utf8), input_names, output_names,
+                        source.cString(using: .utf8), header.cString(using: .utf8),
+                        ensureRowContiguous, atomicOutputs, mutable_names)
+                }
             }
 
             deinit {
@@ -172,16 +183,20 @@ extension DType: KernelTemplateArg {}
         ///   before the kernel runs (at a performance cost)
         ///   - atomicOutputs: whether to use atomic outputs in the function signature,
         ///   e.g. `device atomic<float>`
+        ///   - mutableInputs: owned input buffers written by this kernel. The
+        ///   caller must order mutations in the graph; this declares Metal
+        ///   write access and forbids implicit contiguous copies of those inputs.
         /// - Returns: an ``MLXFastKernel`` -- see that for information on how to call it
         public static func metalKernel(
             name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
             source: String, header: String = "", ensureRowContiguous: Bool = true,
-            atomicOutputs: Bool = false
+            atomicOutputs: Bool = false, mutableInputs: [String] = []
         ) -> MLXFastKernel {
             MLXFastKernel(
                 name: name, inputNames: inputNames, outputNames: outputNames,
                 source: source, header: header,
-                ensureRowContiguous: ensureRowContiguous, atomicOutputs: atomicOutputs
+                ensureRowContiguous: ensureRowContiguous, atomicOutputs: atomicOutputs,
+                mutableInputs: mutableInputs
             )
         }
 
@@ -200,7 +215,7 @@ extension DType: KernelTemplateArg {}
                 name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
                 source: String, header: String = "",
                 ensureRowContiguous: Bool = true,
-                atomicOutputs: Bool = false
+                atomicOutputs: Bool = false, mutableInputs: [String] = []
             ) {
                 self.outputNames = []
                 fatalError("MLXFastKernel is not available without Metal")
@@ -224,7 +239,7 @@ extension DType: KernelTemplateArg {}
         public static func metalKernel(
             name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
             source: String, header: String = "", ensureRowContiguous: Bool = true,
-            atomicOutputs: Bool = false
+            atomicOutputs: Bool = false, mutableInputs: [String] = []
         ) -> MLXFastKernel {
             fatalError("MLXFastKernel is not available without Metal")
         }

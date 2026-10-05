@@ -63,7 +63,11 @@ def:
             headers; `tools/update-mlx*.sh` regenerate the embedded sources against the pinned
             forks. `tools/fix-metal-includes.sh` also copies `dot.metal` and
             `gather_mm_offsets.metal`, so the SwiftPM `default.metallib` carries the two kernels
-            that the core loads by name with no JIT fallback.
+            that the core loads by name with no JIT fallback. The script does not copy
+            `fence.metal`: upstream builds `fence` only at Metal 3.2 or newer, and this package
+            targets macOS 14.0 (Metal 3.1). Thus the SwiftPM `default.metallib` has no `fence`
+            kernels, and `MLX_METAL_FAST_SYNCH=1` needs a metallib built at Metal 3.2 or newer,
+            such as the CMake full-AOT `mlx.metallib`.
           globs:
             - "Package.swift"
             - "Source/Cmlx/mlx-conditional/jaccl_conditional.cpp"

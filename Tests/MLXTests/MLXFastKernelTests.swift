@@ -9,13 +9,20 @@ class MLXFastKernelTests: XCTestCase {
 
     func testSafeMathModeRemainsTheDefault() {
         let source = "uint i = thread_position_in_grid.x; y[i] = x[i];"
-        let ordinary = MLXFast.metalKernel(name: "safe_default", inputNames: ["x"], outputNames: ["y"], source: source)
-        let explicit = MLXFast.metalKernel(name: "safe_default", inputNames: ["x"], outputNames: ["y"], source: source, mathMode: .safe)
+        let ordinary = MLXFast.metalKernel(
+            name: "safe_default", inputNames: ["x"], outputNames: ["y"], source: source)
+        let explicit = MLXFast.metalKernel(
+            name: "safe_default", inputNames: ["x"], outputNames: ["y"], source: source,
+            mathMode: .safe)
         XCTAssertEqual(ordinary.mathMode, .safe)
         XCTAssertEqual(explicit.mathMode, .safe)
         let x = MLXArray([Float(-1), 0, 0.5, 2])
-        let a = ordinary([x], grid: (4, 1, 1), threadGroup: (4, 1, 1), outputShapes: [[4]], outputDTypes: [.float32])[0]
-        let b = explicit([x], grid: (4, 1, 1), threadGroup: (4, 1, 1), outputShapes: [[4]], outputDTypes: [.float32])[0]
+        let a = ordinary(
+            [x], grid: (4, 1, 1), threadGroup: (4, 1, 1), outputShapes: [[4]],
+            outputDTypes: [.float32])[0]
+        let b = explicit(
+            [x], grid: (4, 1, 1), threadGroup: (4, 1, 1), outputShapes: [[4]],
+            outputDTypes: [.float32])[0]
         XCTAssertEqual(a.asData(access: .copy).data, b.asData(access: .copy).data)
         XCTAssertEqual(a.asArray(Float.self), [-1, 0, 0.5, 2])
     }
@@ -25,16 +32,20 @@ class MLXFastKernelTests: XCTestCase {
             throw XCTSkip("The pinned Metal backend requires this OS for relaxed mode")
         }
         for mode in MLXFast.KernelMathMode.allCases {
-            let kernel = MLXFast.metalKernel(name: "math_mode_mutable", inputNames: ["x", "destination"],
-                outputNames: ["y"], source: """
-                uint i = thread_position_in_grid.x;
-                destination[i] = x[i] + 1.0f;
-                y[i] = destination[i];
-                """, mutableInputs: ["destination"], mathMode: mode)
+            let kernel = MLXFast.metalKernel(
+                name: "math_mode_mutable", inputNames: ["x", "destination"],
+                outputNames: ["y"],
+                source: """
+                    uint i = thread_position_in_grid.x;
+                    destination[i] = x[i] + 1.0f;
+                    y[i] = destination[i];
+                    """, mutableInputs: ["destination"], mathMode: mode)
             XCTAssertEqual(kernel.mathMode, mode)
-            let x = MLXArray([Float(1), 2, 3, 4]), destination = MLXArray.zeros([4], dtype: .float32)
+            let x = MLXArray([Float(1), 2, 3, 4])
+            let destination = MLXArray.zeros([4], dtype: .float32)
             eval(x, destination)
-            let result = kernel([x, destination], grid: (4, 1, 1), threadGroup: (4, 1, 1),
+            let result = kernel(
+                [x, destination], grid: (4, 1, 1), threadGroup: (4, 1, 1),
                 outputShapes: [[4]], outputDTypes: [.float32])[0]
             eval(result)
             XCTAssertEqual(result.asArray(Float.self), [2, 3, 4, 5])

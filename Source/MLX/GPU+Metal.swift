@@ -221,13 +221,29 @@ public enum GPU {
     }
 
     /// Get information about the GPU device and system settings
+    ///
+    /// The value is computed once per process.
     public static func deviceInfo() -> DeviceInfo {
+        cachedDeviceInfo
+    }
+
+    private static let cachedDeviceInfo: DeviceInfo = {
         var mib = [CTL_HW, HW_MEMSIZE]
         var memSize: size_t = 0
         var length: size_t = MemoryLayout.size(ofValue: memSize)
         sysctl(&mib, 2, &memSize, &length, nil, 0)
 
-        if let device = MTLCreateSystemDefaultDevice() {
+        // Select the device the same way as MLX (metal::load_device): the first
+        // device of MTLCopyAllDevices(), else the system default device. In a
+        // command-line process MTLCreateSystemDefaultDevice() opens a window
+        // server session, which can stall for many seconds.
+        #if os(macOS)
+            let device = MTLCopyAllDevices().first ?? MTLCreateSystemDefaultDevice()
+        #else
+            let device = MTLCreateSystemDefaultDevice()
+        #endif
+
+        if let device {
             let architecture: String
             if #available(macOS 14.0, iOS 17.0, tvOS 17.0, *) {
                 architecture = device.architecture.name
@@ -244,7 +260,7 @@ public enum GPU {
                 architecture: "Unknown", maxBufferSize: 0, maxRecommendedWorkingSetSize: 0,
                 memorySize: memSize)
         }
-    }
+    }()
 
     /// Runtime state for the opt-in Gemma 4 sorted expert-QMM specialization.
     ///

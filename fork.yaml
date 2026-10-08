@@ -259,6 +259,18 @@ def:
             `TransformerDecoderLayerTests` covers it.
           globs:
             - "Source/MLXNN/Transformer.swift"
+        - title: "MLXArray: updating a parameter releases the old handle"
+          description: |
+            `MLXArray._updateInternal` assigned over the existing handle. Assignment does not run
+            the `mlx::core::array` destructor. The outputs of a multi-output op reference each
+            other, and for unevaluated outputs that nothing else consumes the destructor is where
+            that cycle is broken. `QuantizedLinear` and `QuantizedEmbedding` build weight, scales
+            and biases as outputs of one lazy `quantized` call, so loading a checkpoint over all
+            of them stranded the old graph and the Metal buffers its inputs own, on a quantized
+            model load. `_updateInternal` now builds the new handle, swaps it in and frees the
+            old one. `ModuleUpdateSiblingCycleTests` covers it.
+          globs:
+            - "Source/MLX/MLXArray.swift"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:

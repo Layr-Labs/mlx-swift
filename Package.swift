@@ -96,7 +96,8 @@ let jacclRealSources = [
 // Linux only: MLX_STAGE=<absolute path to a stage folder> links a CMake-built libmlx and
 // libmlxc (mlx-shim scripts/build-mlx-linux.sh) instead of compiling MLX in SwiftPM.
 // The stage folder holds include/ and lib/ side by side: MLX finds its JIT headers at
-// dirname(libmlx.so)/../include.
+// dirname(libmlx.so)/../include. The path is baked into each binary as its rpath, so a
+// moved or deleted stage breaks every binary built against it.
 #if os(Linux)
     let mlxStage = Context.environment["MLX_STAGE"].flatMap { $0.isEmpty ? nil : $0 }
 #else
@@ -250,6 +251,9 @@ let sourceCmlx = Target.target(
         // vendor docs
         "vendor-README.md",
 
+        // staged-mode stub (MLX_STAGE)
+        "stage",
+
         // example code only (distributed C API now enabled)
         "mlx-c/examples",
 
@@ -325,6 +329,7 @@ let sourceCmlx = Target.target(
 
 let cmlx: Target
 if let mlxStage {
+    precondition(mlxStage.hasPrefix("/"), "MLX_STAGE must be an absolute path, got '\(mlxStage)'")
     // Staged: no MLX sources and no CudaBuild plugin. Swift still compiles against the
     // mlx-c header copies in Source/Cmlx/include.
     cmlx = .target(

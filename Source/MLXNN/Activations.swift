@@ -571,7 +571,7 @@ open class ReLUSquared: Module, UnaryLayer {
 @_documentation(visibility: internal)
 open class SoftMax: Module, UnaryLayer {
     open func callAsFunction(_ x: MLXArray) -> MLXArray {
-        softmax(x)
+        softmax(x, axis: -1)
     }
 }
 

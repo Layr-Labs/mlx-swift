@@ -404,7 +404,7 @@ let package = Package(
         .testTarget(
             name: "MLXTests",
             dependencies: [
-                "MLX", "MLXNN", "MLXOptimizers",
+                "MLX", "MLXNN", "MLXOptimizers", "MLXLinalg",
             ]
         ),
 

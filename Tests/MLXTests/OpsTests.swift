@@ -54,6 +54,39 @@ class OpsTests: XCTestCase {
         assertEqual(c, expected)
     }
 
+    /// A [1, K] x [K, 1] product takes the `dot_product` route, whose kernel
+    /// ships only in the prebuilt metallib (`dot.metal`).
+    func testMatmulVectorDotProduct() {
+        let k = 4096
+        let a = (MLXArray(0 ..< k) % 4).asType(.float32)
+        let b = (MLXArray(0 ..< k) % 3).asType(.float32)
+
+        let product = matmul(a.reshaped([1, k]), b.reshaped([k, 1]))
+
+        assertEqual(product, (a * b).sum().reshaped([1, 1]))
+    }
+
+    /// One-row operands with sorted rhs indices take the `gather_mm_rhs`
+    /// route, which builds per-expert row offsets with the `gather_mm_offsets`
+    /// kernel. That kernel ships only in the prebuilt metallib.
+    func testGatherMMSortedRHSIndices() {
+        let rows = 6
+        let experts = 4
+        let k = 64
+        let n = 32
+        let rhsIndices = MLXArray([0, 0, 1, 3, 3, 3] as [Int32])
+
+        for dtype in [DType.float32, .float16] {
+            let a = (MLXArray(0 ..< rows * k) % 4).asType(dtype).reshaped([rows, 1, k])
+            let b = (MLXArray(0 ..< experts * k * n) % 3).asType(dtype)
+                .reshaped([experts, k, n])
+
+            let sorted = gatherMM(a, b, rhsIndices: rhsIndices, sortedIndices: true)
+
+            assertEqual(sorted, matmul(a, b.take(rhsIndices, axis: 0)))
+        }
+    }
+
     func testConvertScalarInt() {
         let a = MLXArray(0 ..< 10)
         let b = a .< (a + 1)

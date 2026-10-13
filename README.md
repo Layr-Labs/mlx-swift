@@ -145,7 +145,7 @@ ninja
 
 **Install Dependencies**
 
-- To build the example binaries, install all dependencies listed in the CI [scripts](.github/scripts/).
+- To build the example binaries, install all dependencies listed in the upstream CI [scripts](https://github.com/ml-explore/mlx-swift/tree/main/.github/scripts).
 - Note: The CUDA GPU backend requires the CUDA toolkit and additional dependencies.
 - For Swift installation on Linux, visit [swift.org](https://www.swift.org/install/linux/).
 

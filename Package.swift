@@ -93,14 +93,24 @@ let jacclRealSources = [
     "mlx/mlx/distributed/jaccl/lib/jaccl/tcp.cpp",
 ]
 
+// Linux only: MLX_STAGE=<absolute path to a stage folder> links a CMake-built libmlx and
+// libmlxc (mlx-shim scripts/build-mlx-linux.sh) instead of compiling MLX in SwiftPM.
+// The stage folder holds include/ and lib/ side by side: MLX finds its JIT headers at
+// dirname(libmlx.so)/../include.
+#if os(Linux)
+    let mlxStage = Context.environment["MLX_STAGE"].flatMap { $0.isEmpty ? nil : $0 }
+#else
+    let mlxStage: String? = nil
+#endif
+
 #if os(Linux)
     let platformExcludes: [String]
     let cxxSettings: [CXXSetting]
     let linkerSettings: [LinkerSetting]
     let mlxSwiftExcludes: [String]
 
-    if Context.environment["SPM_CUDA"] != "0" {
-        // Linux with CUDA
+    if mlxStage != nil || Context.environment["SPM_CUDA"] != "0" {
+        // Linux with CUDA, or any staged backend (the same Swift excludes)
 
         platformExcludes =
             [
@@ -233,7 +243,7 @@ let jacclRealSources = [
     ]
 #endif
 
-let cmlx = Target.target(
+let sourceCmlx = Target.target(
     name: "Cmlx",
     path: "Source/Cmlx",
     exclude: platformExcludes + [
@@ -312,6 +322,26 @@ let cmlx = Target.target(
         .plugin(name: "CudaBuild")
     ],
 )
+
+let cmlx: Target
+if let mlxStage {
+    // Staged: no MLX sources and no CudaBuild plugin. Swift still compiles against the
+    // mlx-c header copies in Source/Cmlx/include.
+    cmlx = .target(
+        name: "Cmlx",
+        path: "Source/Cmlx",
+        sources: ["stage/stage.c"],
+        linkerSettings: [
+            .unsafeFlags([
+                "-L\(mlxStage)/lib", "-Xlinker", "-rpath", "-Xlinker", "\(mlxStage)/lib",
+            ]),
+            .linkedLibrary("mlxc"),
+            .linkedLibrary("mlx"),
+        ]
+    )
+} else {
+    cmlx = sourceCmlx
+}
 
 let package = Package(
     name: "mlx-swift",

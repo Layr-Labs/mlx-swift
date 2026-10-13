@@ -67,9 +67,13 @@ def:
             `fence.metal`: upstream builds `fence` only at Metal 3.2 or newer, and this package
             targets macOS 14.0 (Metal 3.1). Thus the SwiftPM `default.metallib` has no `fence`
             kernels, and `MLX_METAL_FAST_SYNCH=1` needs a metallib built at Metal 3.2 or newer,
-            such as the CMake full-AOT `mlx.metallib`.
+            such as the CMake full-AOT `mlx.metallib`. On Linux, `MLX_STAGE=<stage folder>` makes
+            `Cmlx` a link-only target: it compiles the one-line `Source/Cmlx/stage/stage.c` and links
+            the CMake-built `libmlx` and `libmlxc` from `<stage>/lib` (mlx-shim
+            `scripts/build-mlx-linux.sh`), with no `CudaBuild` plugin.
           globs:
             - "Package.swift"
+            - "Source/Cmlx/stage/stage.c"
             - "Source/Cmlx/mlx-conditional/jaccl_conditional.cpp"
             - "xcode/**"
             - "tools/fix-metal-includes.sh"

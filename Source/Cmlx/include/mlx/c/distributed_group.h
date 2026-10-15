@@ -4,6 +4,8 @@
 #define MLX_DISTRIBUTED_GROUP_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include "mlx/c/stream.h"
 
@@ -40,6 +42,33 @@ int mlx_distributed_init(
     mlx_distributed_group* res,
     bool strict,
     const char* bk /* may be null */);
+
+/**
+ * Synchronous owner-supplied JACCL bootstrap exchange. Return zero only after
+ * writing exactly dst_bytes, in rank order. Pointers must not escape the call.
+ * Callbacks must not throw or reenter MLX. The owner bounds waits and authenticates
+ * its channel, epoch, rank, sequence, lengths and native topology.
+ */
+typedef int (*mlx_distributed_bootstrap_gather)(
+    void* context, int rank, int size, uint64_t sequence,
+    const char* src, size_t src_bytes, char* dst, size_t dst_bytes);
+typedef void (*mlx_distributed_bootstrap_release)(void* context);
+
+/**
+ * Strict JACCL initialization through an owner callback, without TCPAllGather.
+ * Existing cached JACCL initialization is rejected; it is not reauthenticated.
+ * Both callbacks are required. When release_context is non-null, this call
+ * consumes one context reference on every path. Release can occur only when
+ * the native backend cache is destroyed, not when one group handle is freed.
+ * Callback failure is permanent. This API itself does not authenticate bytes.
+ * Bounds: 2..64 ranks, 1..1MiB per rank, at most 8MiB total; the total bound
+ * must fit all ranks at their per-rank bound. Use a fresh worker per epoch.
+ */
+int mlx_distributed_init_jaccl_with_bootstrap(
+    mlx_distributed_group* res, int expected_rank, int expected_size,
+    size_t maximum_rank_bytes, size_t maximum_total_bytes,
+    mlx_distributed_bootstrap_gather gather, void* context,
+    mlx_distributed_bootstrap_release release_context);
 
 /**
  * Get the rank.

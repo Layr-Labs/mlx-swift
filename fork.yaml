@@ -271,7 +271,7 @@ def:
             - "Source/MLX/GPU+Metal.swift"
         - title: "GPU: thread-scoped command-buffer commit limits"
           description: |
-            `GPU.withCommandBufferLimits(maxOps:maxMB:_:)` wraps the fork's
+            `GPU.withCommandBufferLimits(_:_:)` (with `GPU.CommandBufferLimits`) wraps the fork's
             `mlx_metal_set_thread_command_buffer_limits` (header
             `Source/Cmlx/include/mlx/command_buffer_limits.h`): command buffers encoded on the
             calling thread commit after the given operation count or megabytes of distinct

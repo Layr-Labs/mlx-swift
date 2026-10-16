@@ -269,6 +269,19 @@ def:
             list is empty.
           globs:
             - "Source/MLX/GPU+Metal.swift"
+        - title: "GPU: thread-scoped command-buffer commit limits"
+          description: |
+            `GPU.withCommandBufferLimits(maxOps:maxMB:_:)` wraps the fork's
+            `mlx_metal_set_thread_command_buffer_limits` (header
+            `Source/Cmlx/include/mlx/command_buffer_limits.h`): command buffers encoded on the
+            calling thread commit after the given operation count or megabytes of distinct
+            inputs instead of the device defaults, and the previous limits are restored on exit.
+            A caller can give single-token decode steps larger buffers, so the CPU encodes
+            further ahead of the GPU, while prefill keeps the defaults and their memory bound.
+            Partitioning work into command buffers does not change results.
+          globs:
+            - "Source/MLX/GPU+Metal.swift"
+            - "Source/Cmlx/include/mlx/command_buffer_limits.h"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:

@@ -324,3 +324,39 @@ public enum GPU {
     }
 
 }
+
+extension GPU {
+    /// Metal command-buffer commit limits: a buffer is committed once it holds
+    /// more than `operations` operations or more than `megabytes` of distinct
+    /// inputs (weights included). Zero keeps the device default for a limit.
+    public struct CommandBufferLimits: Sendable, Equatable {
+        public var operations: Int
+        public var megabytes: Int
+
+        public init(operations: Int, megabytes: Int) {
+            self.operations = operations
+            self.megabytes = megabytes
+        }
+    }
+
+    /// Runs `body` with `limits` applied to the command buffers that this
+    /// thread encodes, then restores the thread's previous limits. Evaluation
+    /// encodes on the thread that calls `eval` or `asyncEval`, so `body` must
+    /// make that call itself. Results never depend on the partitioning;
+    /// larger buffers let the CPU encode further ahead of the GPU, and keep
+    /// each buffer's temporaries alive until the buffer completes.
+    public static func withCommandBufferLimits<R>(
+        _ limits: CommandBufferLimits, _ body: () throws -> R
+    ) rethrows -> R {
+        var previousOperations: Int32 = 0
+        var previousMegabytes: Int32 = 0
+        mlx_metal_set_thread_command_buffer_limits(
+            Int32(clamping: limits.operations), Int32(clamping: limits.megabytes),
+            &previousOperations, &previousMegabytes)
+        defer {
+            mlx_metal_set_thread_command_buffer_limits(
+                previousOperations, previousMegabytes, nil, nil)
+        }
+        return try body()
+    }
+}

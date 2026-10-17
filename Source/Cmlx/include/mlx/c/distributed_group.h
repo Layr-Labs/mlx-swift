@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "mlx/c/array.h"
 #include "mlx/c/stream.h"
 
 #ifdef __cplusplus
@@ -69,6 +70,26 @@ int mlx_distributed_init_jaccl_with_bootstrap(
     size_t maximum_rank_bytes, size_t maximum_total_bytes,
     mlx_distributed_bootstrap_gather gather, void* context,
     mlx_distributed_bootstrap_release release_context);
+
+/**
+ * Sealed all-sum (Darkbloom fork, mlx/distributed/sealed.h): the two ranks'
+ * partials cross the link only as frames the installed codec seals and opens
+ * (a frame is plaintext bytes + overhead). Callbacks run on the CPU stream's
+ * thread, must not reenter MLX and must not throw; nonzero refuses (the
+ * evaluation fails). counter advances by one per sealed all-sum, identically
+ * on both ranks. A null seal removes the codec.
+ */
+typedef int (*mlx_distributed_seal_fn)(
+    void* context, const void* plaintext, size_t bytes, void* frame, uint64_t counter);
+typedef int (*mlx_distributed_open_fn)(
+    void* context, const void* frame, size_t bytes, void* plaintext, uint64_t counter, int peer);
+int mlx_distributed_set_seal_codec(
+    mlx_distributed_seal_fn seal, mlx_distributed_open_fn open, void* context, size_t overhead);
+int mlx_distributed_all_sum_sealed(
+    mlx_array* res,
+    const mlx_array x,
+    const mlx_distributed_group group /* may be null */,
+    const mlx_stream s);
 
 /**
  * Get the rank.

@@ -259,6 +259,16 @@ def:
             `TransformerDecoderLayerTests` covers it.
           globs:
             - "Source/MLXNN/Transformer.swift"
+        - title: "GPU: query the Metal device once without the window server"
+          description: |
+            `GPU.deviceInfo()` called `MTLCreateSystemDefaultDevice()` on every call. In a
+            command-line process, the first such call opens a window-server session, which
+            stalled for 7.1 s and 30.1 s on an M5 box. The value is now computed once per process,
+            from the first device of `MTLCopyAllDevices()`, which is the device that MLX's
+            `metal::load_device` selects. The system default device is the fallback when that
+            list is empty.
+          globs:
+            - "Source/MLX/GPU+Metal.swift"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:

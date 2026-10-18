@@ -120,8 +120,17 @@ jobs:
         # Counts the Swift sources under Source/MLX* only. The target is 80% line coverage. It is reported, not enforced.
         run: |
           bin=$(swift build --show-bin-path)
-          binary="$bin/mlx-swiftPackageTests.xctest/Contents/MacOS/mlx-swiftPackageTests"
+          # SwiftBuild emits one bundle per test target; the native SwiftPM
+          # build system emits the combined package-test bundle.
+          binary="$bin/MLXTests.xctest/Contents/MacOS/MLXTests"
+          if [ ! -f "$binary" ]; then
+            binary="$bin/mlx-swiftPackageTests.xctest/Contents/MacOS/mlx-swiftPackageTests"
+          fi
           profile="$bin/codecov/default.profdata"
+          if [ ! -f "$binary" ] || [ ! -f "$profile" ]; then
+            echo "::error::Missing test binary or coverage profile under $bin."
+            exit 1
+          fi
           # report FILE DIR... writes the llvm-cov report for the Swift files under the directories.
           # llvm-cov ignores a path that does not exist and then reports every file, so the function checks each path first.
           report() {

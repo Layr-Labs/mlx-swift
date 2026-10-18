@@ -95,8 +95,8 @@ def:
         leaves the JIT source inconsistent — so every kernel change in the `mlx` fork
         (qmv_wide, the E=256 expert-tile route, GPT-OSS MXFP4, FP32 SDPA partials, quantized bias
         sums, segmented NAX GEMM, searchsorted/gemv/dot additions from upstream 0.32) shows up
-        here as regenerated text. The quantized NAX copies also carry partial-tile
-        bounds fixes and match the core's reverted inactive-group optimization.
+        here as regenerated text. Legacy and NAX quantized copies carry partial-tile
+        bounds fixes; NAX matches the core's reverted inactive-group optimization.
         All four quantized loaders have distinct symbols to prevent AOT linkage
         from mixing incompatible affine/FP or legacy/NAX implementations.
         No hand edits; the corresponding dispatch mirrors
@@ -321,6 +321,9 @@ def:
         current. Static section reconstruction does not replace compiler include discovery,
         full regeneration, or binary qualification. Mutation self-tests verify stale copied
         and expanded bodies fail. This gate does not regenerate files.
+        CI coverage locates the MLX test-target bundle emitted by SwiftBuild or
+        the combined package-test bundle emitted by native SwiftPM, and refuses
+        a missing executable or profile before reporting instrumented Swift code.
       globs:
         - "scripts/check_forkdiff.py"
         - "scripts/check-generated-metal-sources.py"

@@ -119,6 +119,11 @@ def:
             enforcement and coherent cap snapshots through the GLMCalibration SPI. The core
             owns page-aligned no-copy backing and returns credit only after its Metal
             deallocator releases the pages; host memory and driver overhead are not capped.
+            The pinned core's footprint policy includes a VM-page minimum before
+            cache-reuse allowance for positive requests, covering page-backed
+            subpage buffers even for a policy captured before cap installation.
+            ALLOCATION-CAP.md distinguishes this per-buffer bound from cap credit
+            and host/OS budgets; zero and overflow handling remain unchanged.
           globs:
             - "Source/MLX/Memory.swift"
             - "Source/MLX/AllocationFootprint.swift"

@@ -86,3 +86,17 @@ Canonical worker binding is intentionally unchanged. It must use the compiled
 SPI, authenticate the authorized native limit, verify the installed snapshot,
 and retain its separate host/headroom and process-exit-only completion contract.
 No model-serving qualification follows from the standalone ledger tests.
+
+## Per-buffer footprint bounds
+
+The pinned core applies a VM-page minimum before adding cache-reuse allowance
+for positive requests. `Memory.allocationFootprintUpperBound(byteCount:)` and
+the detached `AllocationFootprintPolicy` therefore cover page-backed subpage
+buffers, including when the policy is captured before cap installation. With
+16,384-byte pages, requests from 1 through 16,384 bytes have a 32,767-byte bound.
+Zero remains zero; negative sizes and overflow remain refused.
+
+This is a conservative bound for one buffer. It neither measures actual backing
+nor adds cap credit, and it does not replace the fixed-heap charge, graph/scratch
+budgets, host budget, or OS-headroom checks. Actual cap accounting and ownership
+remain governed by the backing lifecycle above.

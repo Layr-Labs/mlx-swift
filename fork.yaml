@@ -115,10 +115,16 @@ def:
             byte OOM — freed buffers recycle into a size-keyed cache trimmed only by bytes).
             `AllocationFootprint` adds coherent accounting snapshots and checked footprint
             policy from the forked allocator so a serving engine can budget KV and weights
-            against real numbers.
+            against real numbers. `Memory+AllocationCap` exposes install-once Metal backing
+            enforcement and coherent cap snapshots through the GLMCalibration SPI. The core
+            owns page-aligned no-copy backing and returns credit only after its Metal
+            deallocator releases the pages; host memory and driver overhead are not capped.
           globs:
             - "Source/MLX/Memory.swift"
             - "Source/MLX/AllocationFootprint.swift"
+            - "Source/MLX/Memory+AllocationCap.swift"
+            - "ALLOCATION-CAP.md"
+            - "tools/check-process-allocation-cap.sh"
         - title: "Process-global default streams"
           description: |
             MLX 0.32 made the default stream's Metal command encoder thread-local, so any

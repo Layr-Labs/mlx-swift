@@ -20,6 +20,18 @@ possible.
 
    or run `pre-commit run --all-files` to check all files in the repo.
 
+## Running the fork tests
+
+The Fork Tests job sets MLX_ENABLE_TF32=0 because its FP32 reference comparisons
+require full-precision products on TF32-capable GPUs. This setting is for tests;
+it does not change the runtime default or relax numerical assertions.
+
+The process allocation-cap test installs a one-time cap before any allocation.
+CI runs it alone in a fresh process with MLX_TEST_PROCESS_CAP=1, then excludes
+it from the ordinary pass. The ordinary pass rejects unexpected skips. It
+allows the opt-in timing test and the sortedness-retract test whose AOT,
+non-NAX hardware condition does not apply on NAX devices.
+
 ## Issues
 
 We use GitHub issues to track public bugs. Please ensure your description is

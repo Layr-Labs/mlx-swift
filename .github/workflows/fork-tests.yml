@@ -17,6 +17,9 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: macos-26
+    env:
+      # FP32 reference tests require full products on TF32-capable GPUs.
+      MLX_ENABLE_TF32: "0"
     timeout-minutes: 150
     permissions:
       contents: read
@@ -90,6 +93,19 @@ jobs:
         # A SwiftPM command-line build compiles no Metal kernels, so the tests find no metallib.
         run: scripts/build-metallib.sh
 
+      - name: Run allocation-cap test in a fresh process
+        env:
+          MLX_TEST_PROCESS_CAP: "1"
+        run: |
+          set -o pipefail
+          cap_log="$RUNNER_TEMP/swift-cap-test.log"
+          swift test --skip-build --enable-code-coverage --filter ProcessAllocationCapTests 2>&1 | tee "$cap_log"
+          if ! grep -Eq "^Test Case '.*ProcessAllocationCapTests testFreshProcessSwiftCap]' passed \(" "$cap_log" ||
+             grep -Eq "^Test Case '.*' (failed|skipped) \(" "$cap_log"; then
+            echo "::error::The fresh-process allocation-cap test must execute and pass without skips."
+            exit 1
+          fi
+
       - name: Run the tests
         env:
           # MLX reads this flag once, when it opens the Metal device. It turns on the sorted expert-tile route for the whole test run.
@@ -100,7 +116,8 @@ jobs:
           # input over the OS-default resource-count stress loop.
           MLX_RESOURCE_LIMIT: "50000"
         run: |
-          swift test --skip-build --enable-code-coverage 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          set -o pipefail
+          swift test --skip-build --enable-code-coverage --skip ProcessAllocationCapTests 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
           # XCTest prints a summary line for each suite. The last line covers the whole run.
           summary=$(grep -E 'Executed [0-9]+ tests?, with' "$RUNNER_TEMP/swift-test.log" | tail -n 1 || true)
           echo "Test summary: $summary" >> "$GITHUB_STEP_SUMMARY"
@@ -108,8 +125,9 @@ jobs:
             echo "::error::The test run executed zero tests."
             exit 1
           fi
-          # XCTest counts a skipped test as executed. Fail on any skip outside the opt-in perf suite.
-          unexpected=$(grep -E "^Test Case '.*' skipped \(" "$RUNNER_TEMP/swift-test.log" | grep -v QwenExpertTilePerfTests || true)
+          # The cap test ran in its own process. Only the opt-in perf test and
+          # the AOT-only retract test on NAX hardware may skip here.
+          unexpected=$(grep -E "^Test Case '.*' skipped \(" "$RUNNER_TEMP/swift-test.log" | grep -Ev "^Test Case '-\[[^.]+\.(QwenExpertTilePerfTests testQwenRoutedPrefillUnitTimings|SortedGatherQuantizedMMTests testQwenSortednessViolationRetractsToLegacyRoute)\]' skipped \(" || true)
           if [ -n "$unexpected" ]; then
             echo "::error::Unexpected skipped tests:"
             echo "$unexpected"

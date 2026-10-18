@@ -95,8 +95,14 @@ def:
         leaves the JIT source inconsistent — so every kernel change in the `mlx` fork
         (qmv_wide, the E=256 expert-tile route, GPT-OSS MXFP4, FP32 SDPA partials, quantized bias
         sums, segmented NAX GEMM, searchsorted/gemv/dot additions from upstream 0.32) shows up
-        here as regenerated text. No hand edits; the corresponding dispatch mirrors
+        here as regenerated text. The quantized NAX copies also carry partial-tile
+        bounds fixes and match the core's reverted inactive-group optimization.
+        All four quantized loaders have distinct symbols to prevent AOT linkage
+        from mixing incompatible affine/FP or legacy/NAX implementations.
+        No hand edits; the corresponding dispatch mirrors
         (`quantized.cpp`, `steel_*.cpp`) are regenerated alongside.
+        SortedGatherQuantizedTailTests checks exact expert projections, partial
+        reduction/output tiles, packing widths and NaN rows across quantization modes.
       globs:
         - "Source/Cmlx/mlx-generated/**"
     - title: "Swift runtime surface"
@@ -139,11 +145,15 @@ def:
             11 s" — the first-token wedge smoking gun — even while a wedged eval holds the lock
             forever. `Transforms+Compile` fixes a compiled-function lock-order inversion found
             during verification, and `MLXArray.description` is wrapped in `evalLock`.
+            The Execution SPI shares that recursive lock with status-checking native
+            evaluation/fences, preventing transport intake from committing the global
+            Metal command buffer during a model evaluation.
           globs:
             - "Source/MLX/EvalProbe.swift"
             - "Source/MLX/Transforms+Eval.swift"
             - "Source/MLX/Transforms+Compile.swift"
             - "Source/MLX/MLXArray.swift"
+            - "Tests/MLXTests/NativeEvaluationSerializationTests.swift"
         - title: "Ops: median over all axes"
           description: |
             `median(_:keepDims:)` passed no axes to `mlx_median`, and MLX raised an error for every
@@ -304,8 +314,17 @@ def:
         is not the merge-base with upstream, or when a file the fork changes is not described
         by a section above. `build-metallib.sh` builds the full MLX Metal library for the
         fork's test run in CI, because a SwiftPM command-line build compiles no Metal kernels.
+        `check-generated-metal-sources.py` checks copied Metal headers and complete declared
+        JIT sections against current nested core, with exact wrappers and source-hash receipts.
+        Its default gate covers affine and FP quantized kernels, including NAX. `--all` audits the broader
+        Metal tree and reports existing drift; it does not claim every generated source is
+        current. Static section reconstruction does not replace compiler include discovery,
+        full regeneration, or binary qualification. Mutation self-tests verify stale copied
+        and expanded bodies fail. This gate does not regenerate files.
       globs:
         - "scripts/check_forkdiff.py"
+        - "scripts/check-generated-metal-sources.py"
+        - "scripts/test-check-generated-metal-sources.py"
         - "scripts/build-metallib.sh"
         - "FORKDIFF.md"
         - "README.md"

@@ -28,6 +28,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Check generated quantized Metal sources
+        run: |
+          python3 scripts/test-check-generated-metal-sources.py
+          python3 scripts/check-generated-metal-sources.py
+
       - name: Select the newest release of Xcode 26
         id: xcode
         run: |
@@ -91,6 +96,9 @@ jobs:
           # Today only the allow-listed shapes in SortedGatherQuantizedMMTests take that route.
           # Without the flag, five tests in that suite skip.
           MLX_GATHER_QMM_EXPERT_SLICES: "1"
+          # Exercise count-based trimming without allocating terabytes of host
+          # input over the OS-default resource-count stress loop.
+          MLX_RESOURCE_LIMIT: "50000"
         run: |
           swift test --skip-build --enable-code-coverage 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
           # XCTest prints a summary line for each suite. The last line covers the whole run.

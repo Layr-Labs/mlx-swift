@@ -181,7 +181,7 @@ MLX_MTL_CONST int SIMD_SIZE = 32;
 MLX_MTL_CONST int QUAD_SIZE = 4;
 
 template <int wsize = 8, int bits = 4>
-inline constexpr short get_pack_factor() {
+inline constexpr short get_fp_pack_factor() {
   return wsize / bits;
 }
 
@@ -318,8 +318,8 @@ template <
     short tgp_size,
     short group_size,
     short bits>
-struct QuantizedBlockLoader {
-  MLX_MTL_CONST short pack_factor = get_pack_factor<8, bits>();
+struct FPQuantizedBlockLoader {
+  MLX_MTL_CONST short pack_factor = get_fp_pack_factor<8, bits>();
   MLX_MTL_CONST short bytes_per_pack = get_bytes_per_pack();
   MLX_MTL_CONST short BCOLS_PACKED = BCOLS / pack_factor;
   MLX_MTL_CONST short n_reads =
@@ -344,7 +344,7 @@ struct QuantizedBlockLoader {
   const device uint8_t* src;
   const device uint8_t* scales;
 
-  QuantizedBlockLoader(
+  FPQuantizedBlockLoader(
       const device uint8_t* src_,
       const device uint8_t* scales_,
       const int src_ld_,
@@ -435,7 +435,7 @@ METAL_FUNC void fp_qmv_quad_impl(
     uint quad_gid [[quadgroup_index_in_threadgroup]],
     uint quad_lid [[thread_index_in_quadgroup]]) {
   constexpr int quads_per_simd = SIMD_SIZE / QUAD_SIZE;
-  constexpr int pack_factor = get_pack_factor<32, bits>();
+  constexpr int pack_factor = get_fp_pack_factor<32, bits>();
   constexpr int values_per_thread = D / QUAD_SIZE;
   constexpr int steps_per_thread =
       values_per_thread < group_size ? 1 : values_per_thread / group_size;
@@ -505,7 +505,7 @@ METAL_FUNC void fp_qmv_fast_impl(
     uint simd_lid [[thread_index_in_simdgroup]]) {
   constexpr int packs_per_thread = 2;
   constexpr int num_simdgroups = 2;
-  constexpr int pack_factor = get_pack_factor<32, bits>();
+  constexpr int pack_factor = get_fp_pack_factor<32, bits>();
   constexpr int bytes_per_pack = get_bytes_per_pack<32>();
   constexpr int values_per_thread = pack_factor * packs_per_thread;
   constexpr int block_size = values_per_thread * SIMD_SIZE;
@@ -593,7 +593,7 @@ METAL_FUNC void fp_qmv_impl(
   constexpr int num_simdgroups = 2;
   constexpr int results_per_simdgroup = 4;
   constexpr int packs_per_thread = 1;
-  constexpr int pack_factor = get_pack_factor<32, bits>();
+  constexpr int pack_factor = get_fp_pack_factor<32, bits>();
   constexpr int bytes_per_pack = get_bytes_per_pack<32>();
 
   constexpr int values_per_thread = pack_factor * packs_per_thread;
@@ -753,7 +753,7 @@ METAL_FUNC void fp_qmv_wide_impl(
     uint simd_lid [[thread_index_in_simdgroup]]) {
   constexpr int num_simdgroups = 2;
   constexpr int results_per_simdgroup = SIMD_SIZE / k_lanes;
-  constexpr int pack_factor = get_pack_factor<32, bits>();
+  constexpr int pack_factor = get_fp_pack_factor<32, bits>();
   constexpr int bytes_per_pack = get_bytes_per_pack<32>();
   constexpr int nf4 = group_size / 4; // float4 lanes per quant group
 
@@ -868,7 +868,7 @@ METAL_FUNC void fp_qvm_impl(
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {
   constexpr int num_simdgroups = 2;
-  constexpr int pack_factor = get_pack_factor<32, bits>();
+  constexpr int pack_factor = get_fp_pack_factor<32, bits>();
   constexpr int bytes_per_pack = get_bytes_per_pack();
 
   constexpr int tn = group_size / pack_factor;
@@ -994,7 +994,7 @@ METAL_FUNC void fp_qmm_t_impl(
 
   constexpr int WM = 2;
   constexpr int WN = 2;
-  constexpr int pack_factor = get_pack_factor<8, bits>();
+  constexpr int pack_factor = get_fp_pack_factor<8, bits>();
   constexpr int bytes_per_pack = get_bytes_per_pack();
 
   constexpr int BK_padded = (BK + 16 / sizeof(T));
@@ -1004,7 +1004,7 @@ METAL_FUNC void fp_qmm_t_impl(
       BlockMMA<T, T, BM, BN, BK, WM, WN, false, true, BK_padded, BK_padded>;
   using loader_x_t =
       mlx::steel::BlockLoader<T, BM, BK, BK_padded, 1, WM * WN * SIMD_SIZE>;
-  using loader_w_t = QuantizedBlockLoader<
+  using loader_w_t = FPQuantizedBlockLoader<
       T,
       BN,
       BK,
@@ -1118,7 +1118,7 @@ METAL_FUNC void fp_qmm_n_impl(
 
   constexpr int WM = 2;
   constexpr int WN = 2;
-  constexpr int pack_factor = get_pack_factor<8, bits>();
+  constexpr int pack_factor = get_fp_pack_factor<8, bits>();
   constexpr int bytes_per_pack = get_bytes_per_pack();
 
   constexpr int BK_padded = (BK + 16 / sizeof(T));
@@ -1129,7 +1129,7 @@ METAL_FUNC void fp_qmm_n_impl(
       BlockMMA<T, T, BM, BN, BK, WM, WN, false, false, BK_padded, BN_padded>;
   using loader_x_t = mlx::steel::
       BlockLoader<T, BM, BK, BK_padded, 1, WM * WN * SIMD_SIZE, 1, 4>;
-  using loader_w_t = QuantizedBlockLoader<
+  using loader_w_t = FPQuantizedBlockLoader<
       T,
       BK,
       BN,
@@ -2057,7 +2057,7 @@ template <
   (void)lid;
 
   constexpr int BK_padded = (BK + 16 / sizeof(T));
-  constexpr int pack_factor = get_pack_factor<8, bits>();
+  constexpr int pack_factor = get_fp_pack_factor<8, bits>();
   constexpr int bytes_per_pack = get_bytes_per_pack();
   threadgroup T Xs[BM * BK_padded];
   threadgroup T Ws[BN * BK_padded];
@@ -2174,7 +2174,7 @@ template <
     uint3 tid [[threadgroup_position_in_grid]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]]) {
-  constexpr int pack_factor = get_pack_factor<8, bits>();
+  constexpr int pack_factor = get_fp_pack_factor<8, bits>();
   constexpr int bytes_per_pack = get_bytes_per_pack();
   constexpr int BK_padded = (BK + 16 / sizeof(T));
   constexpr int BN_padded = (BN + 16 / sizeof(T));
@@ -2193,7 +2193,7 @@ template <
       transpose ? BK_padded : BN_padded>;
   using loader_x_t =
       mlx::steel::BlockLoader<T, BM, BK, BK_padded, 1, WM * WN * SIMD_SIZE>;
-  using loader_w_t = QuantizedBlockLoader<
+  using loader_w_t = FPQuantizedBlockLoader<
       T,
       transpose ? BN : BK,
       transpose ? BK : BN,

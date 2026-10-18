@@ -330,12 +330,15 @@ def:
         CI coverage locates the MLX test-target bundle emitted by SwiftBuild or
         the combined package-test bundle emitted by native SwiftPM, and refuses
         a missing executable or profile before reporting instrumented Swift code.
+        CONTRIBUTING.md documents the full-FP32 test contract and the required
+        fresh-process allocation-cap check, distinct from the ordinary test pass.
       globs:
         - "scripts/check_forkdiff.py"
         - "scripts/check-generated-metal-sources.py"
         - "scripts/test-check-generated-metal-sources.py"
         - "scripts/build-metallib.sh"
         - "FORKDIFF.md"
+        - "CONTRIBUTING.md"
         - "README.md"
 
 # ignored globally, does not count towards line count

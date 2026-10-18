@@ -31,7 +31,7 @@ MLX_MTL_CONST int SIMD_SIZE = 32;
 MLX_MTL_CONST int QUAD_SIZE = 4;
 
 template <int bits, int wsize = 8>
-inline constexpr short get_pack_factor() {
+inline constexpr short get_affine_pack_factor() {
   return (bits == 3 || bits == 5) ? 8 : (bits == 6 ? 4 : wsize / bits);
 }
 
@@ -42,7 +42,7 @@ inline constexpr short get_bytes_per_pack() {
 }
 
 template <typename T, typename U, int values_per_thread, int bits>
-inline U load_vector(const device T* x, thread U* x_thread) {
+inline U nax_load_vector(const device T* x, thread U* x_thread) {
   static_assert(
       bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
           bits == 8,
@@ -121,7 +121,7 @@ inline U load_vector(const device T* x, thread U* x_thread) {
 }
 
 template <typename T, typename U, int values_per_thread, int bits>
-inline U load_vector_safe(const device T* x, thread U* x_thread, int N) {
+inline U nax_load_vector_safe(const device T* x, thread U* x_thread, int N) {
   static_assert(
       bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
           bits == 8,
@@ -592,7 +592,7 @@ template <
     short tgp_size,
     short group_size,
     short bits>
-struct QuantizedBlockLoader {
+struct AffineQuantizedNAXBlockLoader {
   static_assert(
       BCOLS <= group_size,
       "The group size should be larger than the columns");
@@ -604,7 +604,7 @@ struct QuantizedBlockLoader {
           bits == 8,
       "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
 
-  MLX_MTL_CONST short pack_factor = get_pack_factor<bits, 8>();
+  MLX_MTL_CONST short pack_factor = get_affine_pack_factor<bits, 8>();
   MLX_MTL_CONST short bytes_per_pack = get_bytes_per_pack<bits>();
   MLX_MTL_CONST short BCOLS_PACKED = BCOLS / pack_factor;
   MLX_MTL_CONST short n_reads =
@@ -625,7 +625,7 @@ struct QuantizedBlockLoader {
   const device T* scales;
   const device T* biases;
 
-  QuantizedBlockLoader(
+  AffineQuantizedNAXBlockLoader(
       const device uint8_t* src_,
       const device T* scales_,
       const device T* biases_,
@@ -666,14 +666,7 @@ struct QuantizedBlockLoader {
       return;
     }
 
-    if (reduction_dim == 1 && bi >= src_tile_dim.x) {
-      for (int i = 0; i < n_reads * pack_factor; i++) {
-        dst[i] = T(0);
-      }
-      return;
-    }
-
-    if (reduction_dim == 0 && bi >= src_tile_dim.y) {
+    if (bi >= src_tile_dim.y || bj * pack_factor >= src_tile_dim.x) {
       for (int i = 0; i < n_reads * pack_factor; i++) {
         dst[i] = T(0);
       }
@@ -683,11 +676,17 @@ struct QuantizedBlockLoader {
     T scale = *scales;
     T bias = *biases;
     for (int i = 0; i < n_reads; i++) {
-      dequantize<T, pack_factor, bits>(
-          (device uint8_t*)(src + i * bytes_per_pack),
-          scale,
-          bias,
-          dst + i * pack_factor);
+      if ((bj + i) * pack_factor < src_tile_dim.x) {
+        dequantize<T, pack_factor, bits>(
+            (device uint8_t*)(src + i * bytes_per_pack),
+            scale,
+            bias,
+            dst + i * pack_factor);
+      } else {
+        for (int p = 0; p < pack_factor; p++) {
+          dst[i * pack_factor + p] = T(0);
+        }
+      }
     }
   }
 
@@ -720,7 +719,7 @@ template <
     short reduction_dim,
     short tgp_size,
     short bits>
-struct QuantizedBlockLoader<
+struct AffineQuantizedNAXBlockLoader<
     T,
     BROWS,
     BCOLS,
@@ -739,7 +738,7 @@ struct QuantizedBlockLoader<
           bits == 8,
       "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
 
-  MLX_MTL_CONST short pack_factor = get_pack_factor<bits, 8>();
+  MLX_MTL_CONST short pack_factor = get_affine_pack_factor<bits, 8>();
   MLX_MTL_CONST short bytes_per_pack = get_bytes_per_pack<bits>();
   MLX_MTL_CONST short BCOLS_PACKED = BCOLS / pack_factor;
   MLX_MTL_CONST short n_reads =
@@ -765,7 +764,7 @@ struct QuantizedBlockLoader<
   const device T* scales;
   const device T* biases;
 
-  QuantizedBlockLoader(
+  AffineQuantizedNAXBlockLoader(
       const device uint8_t* src_,
       const device T* scales_,
       const device T* biases_,
@@ -806,14 +805,7 @@ struct QuantizedBlockLoader<
       return;
     }
 
-    if (reduction_dim == 1 && bi >= src_tile_dim.x) {
-      for (int i = 0; i < n_reads * pack_factor; i++) {
-        dst[i] = T(0);
-      }
-      return;
-    }
-
-    if (reduction_dim == 0 && bi >= src_tile_dim.y) {
+    if (bi >= src_tile_dim.y || bj * pack_factor >= src_tile_dim.x) {
       for (int i = 0; i < n_reads * pack_factor; i++) {
         dst[i] = T(0);
       }
@@ -823,11 +815,17 @@ struct QuantizedBlockLoader<
     T scale = *scales;
     T bias = *biases;
     for (int i = 0; i < n_reads; i++) {
-      dequantize<T, pack_factor, bits>(
-          (device uint8_t*)(src + i * bytes_per_pack),
-          scale,
-          bias,
-          dst + i * pack_factor);
+      if ((bj + i) * pack_factor < src_tile_dim.x) {
+        dequantize<T, pack_factor, bits>(
+            (device uint8_t*)(src + i * bytes_per_pack),
+            scale,
+            bias,
+            dst + i * pack_factor);
+      } else {
+        for (int p = 0; p < pack_factor; p++) {
+          dst[i * pack_factor + p] = T(0);
+        }
+      }
     }
   }
 
@@ -974,12 +972,12 @@ METAL_FUNC void qmm_t_nax_tgp_impl(
 
   (void)lid;
 
-  constexpr int pack_factor = get_pack_factor<bits, 8>();
+  constexpr int pack_factor = get_affine_pack_factor<bits, 8>();
   constexpr int bytes_per_pack = get_bytes_per_pack<bits>();
 
   constexpr int BK_padded = (BK + 16 / sizeof(T));
 
-  using loader_w_t = QuantizedBlockLoader<
+  using loader_w_t = AffineQuantizedNAXBlockLoader<
       T,
       BN,
       BK,
@@ -1118,12 +1116,12 @@ METAL_FUNC void qmm_n_nax_tgp_impl(
   static_assert(BK >= SIMD_SIZE, "BK should be larger than SIMD_SIZE");
   static_assert(BK % SIMD_SIZE == 0, "BK should be divisible by SIMD_SIZE");
 
-  constexpr int pack_factor = get_pack_factor<bits, 8>();
+  constexpr int pack_factor = get_affine_pack_factor<bits, 8>();
   constexpr int bytes_per_pack = get_bytes_per_pack<bits>();
 
   constexpr int BN_padded = (BN + 16 / sizeof(T));
 
-  using loader_w_t = QuantizedBlockLoader<
+  using loader_w_t = AffineQuantizedNAXBlockLoader<
       T,
       BK,
       BN,
@@ -1499,12 +1497,12 @@ template <
     uint3 tid [[threadgroup_position_in_grid]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]]) {
-  constexpr int pack_factor = get_pack_factor<bits, 8>();
+  constexpr int pack_factor = get_affine_pack_factor<bits, 8>();
   constexpr int bytes_per_pack = get_bytes_per_pack<bits>();
   constexpr int BK_padded = (BK + 16 / sizeof(T));
   constexpr int BN_padded = (BN + 16 / sizeof(T));
 
-  using loader_w_t = QuantizedBlockLoader<
+  using loader_w_t = AffineQuantizedNAXBlockLoader<
       T,
       transpose ? BN : BK,
       transpose ? BK : BN,
@@ -1574,8 +1572,6 @@ template <
 
   using AccumType = float;
 
-  const bool sg_active = sgp_sm > 0;
-
   NAXTile<AccumType, TM, TN> Dtile;
   Dtile.clear();
 
@@ -1606,33 +1602,31 @@ template <
 
         STEEL_PRAGMA_NO_UNROLL
         for (int kk1 = 0; kk1 < BK; kk1 += SK) {
-          if (sg_active) {
-            NAXTile<T, TM, TK> Atile;
-            NAXTile<T, BR, BC> Btile;
+          NAXTile<T, TM, TK> Atile;
+          NAXTile<T, BR, BC> Btile;
 
-            volatile int compiler_barrier;
+          volatile int compiler_barrier;
 
-            if constexpr (kAlignedM.value) {
-              Atile.load(xn + kk1, K);
-            } else {
-              Atile.load_safe(xn + kk1, K, short2(SK, sgp_sm));
-            }
-
-            if constexpr (transpose) {
-              Btile.template load<T, BK_padded, 1>(Ws + tn * BK_padded + kk1);
-            } else {
-              Btile.template load<T, BN_padded, 1>(Ws + tn + kk1 * BN_padded);
-            }
-
-            tile_matmad_nax(
-                Dtile,
-                Atile,
-                metal::bool_constant<false>{},
-                Btile,
-                metal::bool_constant<transpose>{});
-
-            (void)compiler_barrier;
+          if constexpr (kAlignedM.value) {
+            Atile.load(xn + kk1, K);
+          } else {
+            Atile.load_safe(xn + kk1, K, short2(SK, sgp_sm));
           }
+
+          if constexpr (transpose) {
+            Btile.template load<T, BK_padded, 1>(Ws + tn * BK_padded + kk1);
+          } else {
+            Btile.template load<T, BN_padded, 1>(Ws + tn + kk1 * BN_padded);
+          }
+
+          tile_matmad_nax(
+              Dtile,
+              Atile,
+              metal::bool_constant<false>{},
+              Btile,
+              metal::bool_constant<transpose>{});
+
+          (void)compiler_barrier;
         }
 
         xn += BK;
@@ -1646,30 +1640,28 @@ template <
 
         STEEL_PRAGMA_NO_UNROLL
         for (int kk1 = 0; kk1 < BK; kk1 += SK) {
-          if (sg_active) {
-            NAXTile<T, TM, TK> Atile;
-            NAXTile<T, BR, BC> Btile;
+          NAXTile<T, TM, TK> Atile;
+          NAXTile<T, BR, BC> Btile;
 
-            volatile int compiler_barrier;
+          volatile int compiler_barrier;
 
-            const short psk = min(int(SK), max(0, (BK - kk1)));
-            Atile.load_safe(xn + kk1, K, short2(psk, sgp_sm));
+          const short psk = min(int(SK), max(0, (k_remain - kk1)));
+          Atile.load_safe(xn + kk1, K, short2(psk, sgp_sm));
 
-            if constexpr (transpose) {
-              Btile.template load<T, BK_padded, 1>(Ws + tn * BK_padded + kk1);
-            } else {
-              Btile.template load<T, BN_padded, 1>(Ws + tn + kk1 * BN_padded);
-            }
-
-            tile_matmad_nax(
-                Dtile,
-                Atile,
-                metal::bool_constant<false>{},
-                Btile,
-                metal::bool_constant<transpose>{});
-
-            (void)compiler_barrier;
+          if constexpr (transpose) {
+            Btile.template load<T, BK_padded, 1>(Ws + tn * BK_padded + kk1);
+          } else {
+            Btile.template load<T, BN_padded, 1>(Ws + tn + kk1 * BN_padded);
           }
+
+          tile_matmad_nax(
+              Dtile,
+              Atile,
+              metal::bool_constant<false>{},
+              Btile,
+              metal::bool_constant<transpose>{});
+
+          (void)compiler_barrier;
         }
       }
 

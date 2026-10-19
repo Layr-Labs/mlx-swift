@@ -55,6 +55,8 @@ def:
             - "Source/Cmlx/mlx-c"
         - title: "Package manifest and Xcode project"
           description: |
+            `Package.swift` excludes vendored C standalone tests and examples from library
+            source discovery, preventing their entry points from entering linked clients.
             `Package.swift` exposes `Cmlx` as a public library product (so downstream Swift, e.g.
             a distributed provider, can link the C API directly), compiles the `mlx-c`
             distributed wrappers, and wires the JACCL real-backend sources in through a
@@ -345,6 +347,7 @@ def:
         - "FORKDIFF.md"
         - "CONTRIBUTING.md"
         - "README.md"
+
 
 # ignored globally, does not count towards line count
 ignore:

@@ -49,6 +49,8 @@ def:
             `.gitmodules` points `Source/Cmlx/mlx` and `Source/Cmlx/mlx-c` at
             `Layr-Labs/mlx` / `Layr-Labs/mlx-c`; the gitlinks are advanced with each core change.
             The diff shown for the two submodule paths is the pointer change only.
+            The current pair includes the core compiler-capacity retry for 512- and
+            1024-thread Metal groups without changing kernel math or dispatch geometry.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"

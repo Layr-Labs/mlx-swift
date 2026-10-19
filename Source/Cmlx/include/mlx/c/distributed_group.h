@@ -92,6 +92,24 @@ int mlx_distributed_all_sum_sealed(
     const mlx_stream s);
 
 /**
+ * Opt in to one bounded JACCL startup wait on this initialized group.
+ * timeout_ms must be 1..900000; progress cannot renew its absolute deadline.
+ * Drain queued MLX work and serialize scheduling around begin/end; require
+ * no running local group operation. Unsupported backends, repeated begin,
+ * and begin after end refuse. This does not change the global
+ * progress timeout, memory caps, authentication, or failed-group state.
+ */
+int mlx_distributed_group_begin_startup_wait_budget(
+    mlx_distributed_group group,
+    int64_t timeout_ms);
+
+/**
+ * End the one-shot startup budget before publishing READY. Subsequent calls
+ * use the original progress guard. A closed group is never reopened.
+ */
+int mlx_distributed_group_end_startup_wait_budget(mlx_distributed_group group);
+
+/**
  * Get the rank.
  */
 int mlx_distributed_group_rank(mlx_distributed_group group);

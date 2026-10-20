@@ -51,8 +51,8 @@ def:
             The diff shown for the two submodule paths is the pointer change only.
             The current pair includes the core compiler-capacity retry for 512- and
             1024-thread Metal groups without changing kernel math or dispatch geometry,
-            orders the fast-synch GPU wait after every pending pass on its queue, and carries
-            1 MiB JACCL frames.
+            orders the fast-synch GPU wait after every pending pass on its queue, carries
+            1 MiB JACCL frames, and batches buffer retention and caches custom-kernel sources.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"

@@ -51,7 +51,8 @@ extension DType: KernelTemplateArg {}
                 source: String, header: String = "",
                 ensureRowContiguous: Bool = true,
                 atomicOutputs: Bool = false,
-                mutableInputs: [String] = []
+                mutableInputs: [String] = [],
+                fencedInputs: [String] = []
             ) {
                 self.outputNames = Array(outputNames)
 
@@ -67,7 +68,22 @@ extension DType: KernelTemplateArg {}
                     mlx_vector_string_append_value(output_names, name)
                 }
 
-                if mutableInputs.isEmpty {
+                if !fencedInputs.isEmpty {
+                    let mutable_names = mlx_vector_string_new()
+                    defer { mlx_vector_string_free(mutable_names) }
+                    for name in mutableInputs {
+                        mlx_vector_string_append_value(mutable_names, name)
+                    }
+                    let fenced_names = mlx_vector_string_new()
+                    defer { mlx_vector_string_free(fenced_names) }
+                    for name in fencedInputs {
+                        mlx_vector_string_append_value(fenced_names, name)
+                    }
+                    self.kernel = mlx_fast_metal_kernel_new_fenced(
+                        name.cString(using: .utf8), input_names, output_names,
+                        source.cString(using: .utf8), header.cString(using: .utf8),
+                        ensureRowContiguous, atomicOutputs, mutable_names, fenced_names)
+                } else if mutableInputs.isEmpty {
                     self.kernel = mlx_fast_metal_kernel_new(
                         name.cString(using: .utf8), input_names, output_names,
                         source.cString(using: .utf8), header.cString(using: .utf8),
@@ -200,6 +216,30 @@ extension DType: KernelTemplateArg {}
             )
         }
 
+        /// ``metalKernel(name:inputNames:outputNames:source:header:ensureRowContiguous:atomicOutputs:mutableInputs:)``
+        /// with fenced inputs.
+        ///
+        /// A fenced input can come from a CPU stream in the same evaluation, e.g. a
+        /// CPU-stream all-sum. With `MLX_METAL_FENCED_INPUTS=1` (and
+        /// `MLX_METAL_FAST_SYNCH=1`) the kernel waits for that CPU work itself and MLX
+        /// encodes no separate fence-wait dispatch. The source must call
+        /// `MLX_FENCED_INPUT_WAIT(name);` for each fenced input before it reads it, at a
+        /// point that every thread of the threadgroup reaches (it contains a threadgroup
+        /// barrier). Without the variable the call does nothing and MLX waits as before.
+        /// Synchronization only: the outputs do not change.
+        public static func metalKernel(
+            name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
+            source: String, header: String = "", ensureRowContiguous: Bool = true,
+            atomicOutputs: Bool = false, mutableInputs: [String] = [], fencedInputs: [String]
+        ) -> MLXFastKernel {
+            MLXFastKernel(
+                name: name, inputNames: inputNames, outputNames: outputNames,
+                source: source, header: header,
+                ensureRowContiguous: ensureRowContiguous, atomicOutputs: atomicOutputs,
+                mutableInputs: mutableInputs, fencedInputs: fencedInputs
+            )
+        }
+
     }  // MLXFast
 
 #else
@@ -215,7 +255,8 @@ extension DType: KernelTemplateArg {}
                 name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
                 source: String, header: String = "",
                 ensureRowContiguous: Bool = true,
-                atomicOutputs: Bool = false, mutableInputs: [String] = []
+                atomicOutputs: Bool = false, mutableInputs: [String] = [],
+                fencedInputs: [String] = []
             ) {
                 self.outputNames = []
                 fatalError("MLXFastKernel is not available without Metal")
@@ -240,6 +281,14 @@ extension DType: KernelTemplateArg {}
             name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
             source: String, header: String = "", ensureRowContiguous: Bool = true,
             atomicOutputs: Bool = false, mutableInputs: [String] = []
+        ) -> MLXFastKernel {
+            fatalError("MLXFastKernel is not available without Metal")
+        }
+
+        public static func metalKernel(
+            name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
+            source: String, header: String = "", ensureRowContiguous: Bool = true,
+            atomicOutputs: Bool = false, mutableInputs: [String] = [], fencedInputs: [String]
         ) -> MLXFastKernel {
             fatalError("MLXFastKernel is not available without Metal")
         }

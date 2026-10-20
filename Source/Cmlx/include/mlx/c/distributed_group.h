@@ -85,6 +85,26 @@ typedef int (*mlx_distributed_open_fn)(
     void* context, const void* frame, size_t bytes, void* plaintext, uint64_t counter, int peer);
 int mlx_distributed_set_seal_codec(
     mlx_distributed_seal_fn seal, mlx_distributed_open_fn open, void* context, size_t overhead);
+/**
+ * The same codec with per-piece callbacks. On a two-rank JACCL mesh a partial
+ * then crosses as pieces of piece_bytes plaintext bytes (the last can be
+ * shorter), each sealed as its ciphertext then a 16-byte tag, in order. One
+ * CPU-stream task sends each piece when it is sealed and opens and adds each
+ * peer piece when it lands. Other groups use seal and open. The piece
+ * callbacks run at the same time on worker threads, in any order within one
+ * counter; they must not reenter MLX or throw; nonzero refuses (the
+ * evaluation fails). piece_bytes: a multiple of 16 in [4 KiB, 16 MiB].
+ */
+typedef int (*mlx_distributed_seal_piece_fn)(
+    void* context, const void* plaintext, size_t length, void* sealed,
+    uint64_t counter, uint32_t piece, uint32_t pieces, size_t total);
+typedef int (*mlx_distributed_open_piece_fn)(
+    void* context, const void* sealed, size_t length, void* plaintext,
+    uint64_t counter, uint32_t piece, uint32_t pieces, size_t total, int peer);
+int mlx_distributed_set_streamed_seal_codec(
+    mlx_distributed_seal_fn seal, mlx_distributed_open_fn open,
+    mlx_distributed_seal_piece_fn seal_piece, mlx_distributed_open_piece_fn open_piece,
+    void* context, size_t overhead, size_t piece_bytes);
 int mlx_distributed_all_sum_sealed(
     mlx_array* res,
     const mlx_array x,

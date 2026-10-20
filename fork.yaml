@@ -52,7 +52,9 @@ def:
             The current pair includes the core compiler-capacity retry for 512- and
             1024-thread Metal groups without changing kernel math or dispatch geometry,
             orders the fast-synch GPU wait after every pending pass on its queue, carries
-            1 MiB JACCL frames, and batches buffer retention and caches custom-kernel sources.
+            1 MiB JACCL frames, batches buffer retention, caches custom-kernel sources and
+            streams the sealed all-sum per AES-256-GCM piece over a two-rank JACCL exchange
+            (`mlx_distributed_set_streamed_seal_codec` in the vendored C header).
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"

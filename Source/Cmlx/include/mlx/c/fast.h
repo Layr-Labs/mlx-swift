@@ -189,6 +189,24 @@ int mlx_fast_metal_kernel_apply(
     const mlx_fast_metal_kernel_config config,
     const mlx_stream stream);
 
+/**
+ * A prepared launch: `cls` with a fixed config (template arguments, grid,
+ * threadgroup, output shapes and dtypes, init value), bound once and applied
+ * to new inputs without rebuilding the config. `cls` must outlive it.
+ */
+typedef struct mlx_fast_metal_kernel_launch_ {
+  void* ctx;
+} mlx_fast_metal_kernel_launch;
+mlx_fast_metal_kernel_launch mlx_fast_metal_kernel_launch_new(
+    mlx_fast_metal_kernel cls,
+    const mlx_fast_metal_kernel_config config);
+void mlx_fast_metal_kernel_launch_free(mlx_fast_metal_kernel_launch launch);
+int mlx_fast_metal_kernel_launch_apply(
+    mlx_vector_array* outputs,
+    mlx_fast_metal_kernel_launch launch,
+    const mlx_vector_array inputs,
+    const mlx_stream stream);
+
 int mlx_fast_rms_norm(
     mlx_array* res,
     const mlx_array x,

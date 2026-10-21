@@ -16,6 +16,18 @@ extension Bool: KernelTemplateArg {}
 extension Int: KernelTemplateArg {}
 extension DType: KernelTemplateArg {}
 
+extension MLXFast {
+    /// Compiler math mode for one custom Metal kernel, fixed at construction.
+    /// The default remains safe; opting in can change numerical results.
+    /// Backend platform requirements still apply (relaxed requires macOS 15,
+    /// iOS/tvOS 18 or visionOS 2). This never changes a process-wide default.
+    public enum KernelMathMode: Int32, Sendable, CaseIterable {
+        case safe = 0
+        case relaxed = 1
+        case fast = 2
+    }
+}
+
 #if os(macOS) || os(iOS) || os(tvOS) || os(visionOS)
 
     extension MLXFast {
@@ -45,6 +57,7 @@ extension DType: KernelTemplateArg {}
         final public class MLXFastKernel: @unchecked Sendable {
             let kernel: mlx_fast_metal_kernel
             public let outputNames: [String]
+            public let mathMode: KernelMathMode
 
             init(
                 name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
@@ -52,9 +65,11 @@ extension DType: KernelTemplateArg {}
                 ensureRowContiguous: Bool = true,
                 atomicOutputs: Bool = false,
                 mutableInputs: [String] = [],
-                fencedInputs: [String] = []
+                fencedInputs: [String] = [],
+                mathMode: KernelMathMode = .safe
             ) {
                 self.outputNames = Array(outputNames)
+                self.mathMode = mathMode
 
                 let input_names = mlx_vector_string_new()
                 defer { mlx_vector_string_free(input_names) }
@@ -68,21 +83,37 @@ extension DType: KernelTemplateArg {}
                     mlx_vector_string_append_value(output_names, name)
                 }
 
-                if !fencedInputs.isEmpty {
+                precondition(
+                    fencedInputs.isEmpty || mathMode == .safe,
+                    "MLXFastKernel: fenced inputs use the safe math mode only")
+                if !fencedInputs.isEmpty || mathMode != .safe {
                     let mutable_names = mlx_vector_string_new()
                     defer { mlx_vector_string_free(mutable_names) }
                     for name in mutableInputs {
                         mlx_vector_string_append_value(mutable_names, name)
                     }
-                    let fenced_names = mlx_vector_string_new()
-                    defer { mlx_vector_string_free(fenced_names) }
-                    for name in fencedInputs {
-                        mlx_vector_string_append_value(fenced_names, name)
+                    if !fencedInputs.isEmpty {
+                        let fenced_names = mlx_vector_string_new()
+                        defer { mlx_vector_string_free(fenced_names) }
+                        for name in fencedInputs {
+                            mlx_vector_string_append_value(fenced_names, name)
+                        }
+                        self.kernel = mlx_fast_metal_kernel_new_fenced(
+                            name.cString(using: .utf8), input_names, output_names,
+                            source.cString(using: .utf8), header.cString(using: .utf8),
+                            ensureRowContiguous, atomicOutputs, mutable_names, fenced_names)
+                    } else {
+                        let nativeMode: mlx_fast_metal_kernel_math_mode
+                        switch mathMode {
+                        case .safe: nativeMode = MLX_FAST_METAL_MATH_SAFE
+                        case .relaxed: nativeMode = MLX_FAST_METAL_MATH_RELAXED
+                        case .fast: nativeMode = MLX_FAST_METAL_MATH_FAST
+                        }
+                        self.kernel = mlx_fast_metal_kernel_new_with_options(
+                            name.cString(using: .utf8), input_names, output_names,
+                            source.cString(using: .utf8), header.cString(using: .utf8),
+                            ensureRowContiguous, atomicOutputs, mutable_names, nativeMode)
                     }
-                    self.kernel = mlx_fast_metal_kernel_new_fenced(
-                        name.cString(using: .utf8), input_names, output_names,
-                        source.cString(using: .utf8), header.cString(using: .utf8),
-                        ensureRowContiguous, atomicOutputs, mutable_names, fenced_names)
                 } else if mutableInputs.isEmpty {
                     self.kernel = mlx_fast_metal_kernel_new(
                         name.cString(using: .utf8), input_names, output_names,
@@ -302,17 +333,20 @@ extension DType: KernelTemplateArg {}
         ///   - mutableInputs: owned input buffers written by this kernel. The
         ///   caller must order mutations in the graph; this declares Metal
         ///   write access and forbids implicit contiguous copies of those inputs.
+        ///   - mathMode: per-kernel compiler mode. Defaults to safe; qualify numerical
+        ///   behavior before opting in. No other kernel or global setting is changed.
         /// - Returns: an ``MLXFastKernel`` -- see that for information on how to call it
         public static func metalKernel(
             name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
             source: String, header: String = "", ensureRowContiguous: Bool = true,
-            atomicOutputs: Bool = false, mutableInputs: [String] = []
+            atomicOutputs: Bool = false, mutableInputs: [String] = [],
+            mathMode: KernelMathMode = .safe
         ) -> MLXFastKernel {
             MLXFastKernel(
                 name: name, inputNames: inputNames, outputNames: outputNames,
                 source: source, header: header,
                 ensureRowContiguous: ensureRowContiguous, atomicOutputs: atomicOutputs,
-                mutableInputs: mutableInputs
+                mutableInputs: mutableInputs, mathMode: mathMode
             )
         }
 
@@ -350,15 +384,18 @@ extension DType: KernelTemplateArg {}
 
         final public class MLXFastKernel: @unchecked Sendable {
             public let outputNames: [String]
+            public let mathMode: KernelMathMode
 
             init(
                 name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
                 source: String, header: String = "",
                 ensureRowContiguous: Bool = true,
                 atomicOutputs: Bool = false, mutableInputs: [String] = [],
-                fencedInputs: [String] = []
+                fencedInputs: [String] = [],
+                mathMode: KernelMathMode = .safe
             ) {
                 self.outputNames = []
+                self.mathMode = mathMode
                 fatalError("MLXFastKernel is not available without Metal")
             }
 
@@ -400,7 +437,8 @@ extension DType: KernelTemplateArg {}
         public static func metalKernel(
             name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,
             source: String, header: String = "", ensureRowContiguous: Bool = true,
-            atomicOutputs: Bool = false, mutableInputs: [String] = []
+            atomicOutputs: Bool = false, mutableInputs: [String] = [],
+            mathMode: KernelMathMode = .safe
         ) -> MLXFastKernel {
             fatalError("MLXFastKernel is not available without Metal")
         }

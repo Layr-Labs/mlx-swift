@@ -42,18 +42,21 @@ public typealias MLXFastKernel = MLXFast.MLXFastKernel
 ///   before the kernel runs (at a performance cost)
 ///   - atomicOutputs: whether to use atomic outputs in the function signature,
 ///   e.g. `device atomic<float>`
+///   - mathMode: explicit per-kernel compiler mode. The default remains safe;
+///   changing modes may change numerical results and requires qualification.
 /// - Returns: an ``MLXFastKernel`` -- see that for information on how to call it
 public func metalKernel(
     name: String, inputNames: [String], outputNames: [String],
     source: String, header: String = "",
     ensureRowContiguous: Bool = true,
     atomicOutputs: Bool = false,
-    mutableInputs: [String] = []
+    mutableInputs: [String] = [],
+    mathMode: MLXFast.KernelMathMode = .safe
 ) -> MLXFast.MLXFastKernel {
     return MLX.MLXFast.metalKernel(
         name: name, inputNames: inputNames, outputNames: outputNames,
         source: source, header: header,
         ensureRowContiguous: ensureRowContiguous, atomicOutputs: atomicOutputs,
-        mutableInputs: mutableInputs
+        mutableInputs: mutableInputs, mathMode: mathMode
     )
 }

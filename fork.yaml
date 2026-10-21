@@ -242,11 +242,15 @@ def:
             upstream MLX does, so allowed positions are 0. `TransformerCausalMaskTests` covers it.
           globs:
             - "Source/MLXNN/Transformer.swift"
-        - title: "Custom Metal kernels: mutable inputs"
+        - title: "Custom Metal kernels: mutable inputs and explicit math modes"
           description: |
             Swift custom Metal kernels take a default-empty `mutableInputs` list, forwarded
             through the C API, declaring Metal write access on owned input buffers and
             forbidding implicit contiguous copies of them (needed by the Nemotron kernels).
+            `MLXFast.KernelMathMode` adds an explicit per-kernel safe, relaxed or fast
+            compiler mode. The default remains safe and retains the legacy constructors;
+            non-safe modes use the new C options entry point and need numerical qualification.
+            Both the MLX and compatibility MLXFast APIs retain mutable-input semantics.
           globs:
             - "Source/MLX/MLXFastKernel.swift"
             - "Source/MLXFast/MLXFastKernel.swift"
@@ -294,6 +298,19 @@ def:
             list is empty.
           globs:
             - "Source/MLX/GPU+Metal.swift"
+        - title: "GPU: thread-scoped command-buffer commit limits"
+          description: |
+            `GPU.withCommandBufferLimits(_:_:)` (with `GPU.CommandBufferLimits`) wraps the fork's
+            `mlx_metal_set_thread_command_buffer_limits` (header
+            `Source/Cmlx/include/mlx/command_buffer_limits.h`): command buffers encoded on the
+            calling thread commit after the given operation count or megabytes of distinct
+            inputs instead of the device defaults, and the previous limits are restored on exit.
+            A caller can give single-token decode steps larger buffers, so the CPU encodes
+            further ahead of the GPU, while prefill keeps the defaults and their memory bound.
+            Partitioning work into command buffers does not change results.
+          globs:
+            - "Source/MLX/GPU+Metal.swift"
+            - "Source/Cmlx/include/mlx/command_buffer_limits.h"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:

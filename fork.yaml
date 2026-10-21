@@ -49,12 +49,16 @@ def:
             `.gitmodules` points `Source/Cmlx/mlx` and `Source/Cmlx/mlx-c` at
             `Layr-Labs/mlx` / `Layr-Labs/mlx-c`; the gitlinks are advanced with each core change.
             The diff shown for the two submodule paths is the pointer change only.
+            The current pair includes the core compiler-capacity retry for 512- and
+            1024-thread Metal groups without changing kernel math or dispatch geometry.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"
             - "Source/Cmlx/mlx-c"
         - title: "Package manifest and Xcode project"
           description: |
+            `Package.swift` excludes vendored C standalone tests and examples from library
+            source discovery, preventing their entry points from entering linked clients.
             `Package.swift` exposes `Cmlx` as a public library product (so downstream Swift, e.g.
             a distributed provider, can link the C API directly), compiles the `mlx-c`
             distributed wrappers, and wires the JACCL real-backend sources in through a
@@ -95,8 +99,14 @@ def:
         leaves the JIT source inconsistent — so every kernel change in the `mlx` fork
         (qmv_wide, the E=256 expert-tile route, GPT-OSS MXFP4, FP32 SDPA partials, quantized bias
         sums, segmented NAX GEMM, searchsorted/gemv/dot additions from upstream 0.32) shows up
-        here as regenerated text. No hand edits; the corresponding dispatch mirrors
+        here as regenerated text. Legacy and NAX quantized copies carry partial-tile
+        bounds fixes; NAX matches the core's reverted inactive-group optimization.
+        All four quantized loaders have distinct symbols to prevent AOT linkage
+        from mixing incompatible affine/FP or legacy/NAX implementations.
+        No hand edits; the corresponding dispatch mirrors
         (`quantized.cpp`, `steel_*.cpp`) are regenerated alongside.
+        SortedGatherQuantizedTailTests checks exact expert projections, partial
+        reduction/output tiles, packing widths and NaN rows across quantization modes.
       globs:
         - "Source/Cmlx/mlx-generated/**"
     - title: "Swift runtime surface"
@@ -109,10 +119,21 @@ def:
             byte OOM — freed buffers recycle into a size-keyed cache trimmed only by bytes).
             `AllocationFootprint` adds coherent accounting snapshots and checked footprint
             policy from the forked allocator so a serving engine can budget KV and weights
-            against real numbers.
+            against real numbers. `Memory+AllocationCap` exposes install-once Metal backing
+            enforcement and coherent cap snapshots through the GLMCalibration SPI. The core
+            owns page-aligned no-copy backing and returns credit only after its Metal
+            deallocator releases the pages; host memory and driver overhead are not capped.
+            The pinned core's footprint policy includes a VM-page minimum before
+            cache-reuse allowance for positive requests, covering page-backed
+            subpage buffers even for a policy captured before cap installation.
+            ALLOCATION-CAP.md distinguishes this per-buffer bound from cap credit
+            and host/OS budgets; zero and overflow handling remain unchanged.
           globs:
             - "Source/MLX/Memory.swift"
             - "Source/MLX/AllocationFootprint.swift"
+            - "Source/MLX/Memory+AllocationCap.swift"
+            - "ALLOCATION-CAP.md"
+            - "tools/check-process-allocation-cap.sh"
         - title: "Process-global default streams"
           description: |
             MLX 0.32 made the default stream's Metal command encoder thread-local, so any
@@ -139,11 +160,15 @@ def:
             11 s" — the first-token wedge smoking gun — even while a wedged eval holds the lock
             forever. `Transforms+Compile` fixes a compiled-function lock-order inversion found
             during verification, and `MLXArray.description` is wrapped in `evalLock`.
+            The Execution SPI shares that recursive lock with status-checking native
+            evaluation/fences, preventing transport intake from committing the global
+            Metal command buffer during a model evaluation.
           globs:
             - "Source/MLX/EvalProbe.swift"
             - "Source/MLX/Transforms+Eval.swift"
             - "Source/MLX/Transforms+Compile.swift"
             - "Source/MLX/MLXArray.swift"
+            - "Tests/MLXTests/NativeEvaluationSerializationTests.swift"
         - title: "Ops: median over all axes"
           description: |
             `median(_:keepDims:)` passed no axes to `mlx_median`, and MLX raised an error for every
@@ -321,11 +346,27 @@ def:
         is not the merge-base with upstream, or when a file the fork changes is not described
         by a section above. `build-metallib.sh` builds the full MLX Metal library for the
         fork's test run in CI, because a SwiftPM command-line build compiles no Metal kernels.
+        `check-generated-metal-sources.py` checks copied Metal headers and complete declared
+        JIT sections against current nested core, with exact wrappers and source-hash receipts.
+        Its default gate covers affine and FP quantized kernels, including NAX. `--all` audits the broader
+        Metal tree and reports existing drift; it does not claim every generated source is
+        current. Static section reconstruction does not replace compiler include discovery,
+        full regeneration, or binary qualification. Mutation self-tests verify stale copied
+        and expanded bodies fail. This gate does not regenerate files.
+        CI coverage locates the MLX test-target bundle emitted by SwiftBuild or
+        the combined package-test bundle emitted by native SwiftPM, and refuses
+        a missing executable or profile before reporting instrumented Swift code.
+        CONTRIBUTING.md documents the full-FP32 test contract and the required
+        fresh-process allocation-cap check, distinct from the ordinary test pass.
       globs:
         - "scripts/check_forkdiff.py"
+        - "scripts/check-generated-metal-sources.py"
+        - "scripts/test-check-generated-metal-sources.py"
         - "scripts/build-metallib.sh"
         - "FORKDIFF.md"
+        - "CONTRIBUTING.md"
         - "README.md"
+
 
 # ignored globally, does not count towards line count
 ignore:

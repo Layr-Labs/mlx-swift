@@ -17,6 +17,9 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: macos-26
+    env:
+      # FP32 reference tests require full products on TF32-capable GPUs.
+      MLX_ENABLE_TF32: "0"
     timeout-minutes: 150
     permissions:
       contents: read
@@ -27,6 +30,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
+
+      - name: Check generated quantized Metal sources
+        run: |
+          python3 scripts/test-check-generated-metal-sources.py
+          python3 scripts/check-generated-metal-sources.py
 
       - name: Select the newest release of Xcode 26
         id: xcode
@@ -85,14 +93,31 @@ jobs:
         # A SwiftPM command-line build compiles no Metal kernels, so the tests find no metallib.
         run: scripts/build-metallib.sh
 
+      - name: Run allocation-cap test in a fresh process
+        env:
+          MLX_TEST_PROCESS_CAP: "1"
+        run: |
+          set -o pipefail
+          cap_log="$RUNNER_TEMP/swift-cap-test.log"
+          swift test --skip-build --enable-code-coverage --filter ProcessAllocationCapTests 2>&1 | tee "$cap_log"
+          if ! grep -Eq "^Test Case '.*ProcessAllocationCapTests testFreshProcessSwiftCap]' passed \(" "$cap_log" ||
+             grep -Eq "^Test Case '.*' (failed|skipped) \(" "$cap_log"; then
+            echo "::error::The fresh-process allocation-cap test must execute and pass without skips."
+            exit 1
+          fi
+
       - name: Run the tests
         env:
           # MLX reads this flag once, when it opens the Metal device. It turns on the sorted expert-tile route for the whole test run.
           # Today only the allow-listed shapes in SortedGatherQuantizedMMTests take that route.
           # Without the flag, five tests in that suite skip.
           MLX_GATHER_QMM_EXPERT_SLICES: "1"
+          # Exercise count-based trimming without allocating terabytes of host
+          # input over the OS-default resource-count stress loop.
+          MLX_RESOURCE_LIMIT: "50000"
         run: |
-          swift test --skip-build --enable-code-coverage 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          set -o pipefail
+          swift test --skip-build --enable-code-coverage --skip ProcessAllocationCapTests 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
           # XCTest prints a summary line for each suite. The last line covers the whole run.
           summary=$(grep -E 'Executed [0-9]+ tests?, with' "$RUNNER_TEMP/swift-test.log" | tail -n 1 || true)
           echo "Test summary: $summary" >> "$GITHUB_STEP_SUMMARY"
@@ -100,8 +125,9 @@ jobs:
             echo "::error::The test run executed zero tests."
             exit 1
           fi
-          # XCTest counts a skipped test as executed. Fail on any skip outside the opt-in perf suite.
-          unexpected=$(grep -E "^Test Case '.*' skipped \(" "$RUNNER_TEMP/swift-test.log" | grep -v QwenExpertTilePerfTests || true)
+          # The cap test ran in its own process. Only the opt-in perf test and
+          # the AOT-only retract test on NAX hardware may skip here.
+          unexpected=$(grep -E "^Test Case '.*' skipped \(" "$RUNNER_TEMP/swift-test.log" | grep -Ev "^Test Case '-\[[^.]+\.(QwenExpertTilePerfTests testQwenRoutedPrefillUnitTimings|SortedGatherQuantizedMMTests testQwenSortednessViolationRetractsToLegacyRoute)\]' skipped \(" || true)
           if [ -n "$unexpected" ]; then
             echo "::error::Unexpected skipped tests:"
             echo "$unexpected"
@@ -112,8 +138,17 @@ jobs:
         # Counts the Swift sources under Source/MLX* only. The target is 80% line coverage. It is reported, not enforced.
         run: |
           bin=$(swift build --show-bin-path)
-          binary="$bin/mlx-swiftPackageTests.xctest/Contents/MacOS/mlx-swiftPackageTests"
+          # SwiftBuild emits one bundle per test target; the native SwiftPM
+          # build system emits the combined package-test bundle.
+          binary="$bin/MLXTests.xctest/Contents/MacOS/MLXTests"
+          if [ ! -f "$binary" ]; then
+            binary="$bin/mlx-swiftPackageTests.xctest/Contents/MacOS/mlx-swiftPackageTests"
+          fi
           profile="$bin/codecov/default.profdata"
+          if [ ! -f "$binary" ] || [ ! -f "$profile" ]; then
+            echo "::error::Missing test binary or coverage profile under $bin."
+            exit 1
+          fi
           # report FILE DIR... writes the llvm-cov report for the Swift files under the directories.
           # llvm-cov ignores a path that does not exist and then reports every file, so the function checks each path first.
           report() {

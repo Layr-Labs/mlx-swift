@@ -52,8 +52,7 @@ def:
             Both pins are merges of upstream `main` into the forks (2026-10-22). The `mlx` pin
             keeps the core compiler-capacity retry for 512- and 1024-thread Metal groups. The
             `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
-            own C API. The pins are `mlx` dbf463fc and `mlx-c` ef55d7c7, whose CMake
-            `GIT_TAG` names the same `mlx` commit.
+            own C API. The pins are `mlx` 089acfe1 and `mlx-c` ef55d7c7.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"

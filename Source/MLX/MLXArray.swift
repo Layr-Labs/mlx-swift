@@ -571,7 +571,16 @@ public final class MLXArray {
     /// Note: this is an implementation detail and only visible because of the need to call it from
     /// other `mlx-swift` modules.
     public func _updateInternal(_ array: MLXArray) {
-        mlx_array_set(&self.ctx, array.ctx)
+        // Assignment onto the old handle never runs `mlx::core::array::~array()`. Sibling
+        // outputs of a multi-output primitive reference each other, and for unevaluated outputs
+        // that nothing else consumes that destructor is where the cycle is broken. Build the
+        // replacement first (safe for `a._updateInternal(a)`), then free the old handle so the
+        // destructor runs. A failed copy leaves this array unchanged.
+        var new = mlx_array_new()
+        guard mlx_array_set(&new, array.ctx) == 0 else { return }
+        let old = self.ctx
+        self.ctx = new
+        mlx_array_free(old)
     }
 
     /// Internal function for copying the backing `mlx::core::array` context.

@@ -8,6 +8,18 @@ import Foundation
 /// call back into eval.
 let evalLock = NSRecursiveLock()
 
+/// Serialize a synchronous native evaluation/fence with Swift evaluation.
+///
+/// Native integrations that inspect C return statuses must share the same
+/// recursive lock as `eval`, array reads, and stream synchronization. A
+/// separate integration lock cannot protect the process-global command encoder.
+/// The body must not suspend or wait for another thread to submit native work.
+/// This does not make concurrent graph construction or mutation safe.
+@_spi(Execution)
+public func withSerializedEvaluation<R>(_ body: () throws -> R) rethrows -> R {
+    try evalLock.withLock(body)
+}
+
 /// Evaluate one or more `MLXArray`
 ///
 /// ### See Also

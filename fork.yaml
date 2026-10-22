@@ -49,12 +49,24 @@ def:
             `.gitmodules` points `Source/Cmlx/mlx` and `Source/Cmlx/mlx-c` at
             `Layr-Labs/mlx` / `Layr-Labs/mlx-c`; the gitlinks are advanced with each core change.
             The diff shown for the two submodule paths is the pointer change only.
+            The current pair includes the core compiler-capacity retry for 512- and
+            1024-thread Metal groups without changing kernel math or dispatch geometry,
+            orders the fast-synch GPU wait after every pending pass on its queue, carries
+            1 MiB JACCL frames, batches buffer retention, caches custom-kernel sources and
+            streams the sealed all-sum per AES-256-GCM piece over a two-rank JACCL exchange
+            (`mlx_distributed_set_streamed_seal_codec` in the vendored C header), offers
+            opt-in fused fence updates and fenced custom-kernel inputs, and cuts host time
+            per custom-kernel launch and graph node. The page-backed footprint change is
+            reverted, as on the single-Mac stack, and the thread-scoped command-buffer
+            commit limits come from main.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"
             - "Source/Cmlx/mlx-c"
         - title: "Package manifest and Xcode project"
           description: |
+            `Package.swift` excludes vendored C standalone tests and examples from library
+            source discovery, preventing their entry points from entering linked clients.
             `Package.swift` exposes `Cmlx` as a public library product (so downstream Swift, e.g.
             a distributed provider, can link the C API directly), compiles the `mlx-c`
             distributed wrappers, and wires the JACCL real-backend sources in through a
@@ -95,8 +107,14 @@ def:
         leaves the JIT source inconsistent — so every kernel change in the `mlx` fork
         (qmv_wide, the E=256 expert-tile route, GPT-OSS MXFP4, FP32 SDPA partials, quantized bias
         sums, segmented NAX GEMM, searchsorted/gemv/dot additions from upstream 0.32) shows up
-        here as regenerated text. No hand edits; the corresponding dispatch mirrors
+        here as regenerated text. Legacy and NAX quantized copies carry partial-tile
+        bounds fixes; NAX matches the core's reverted inactive-group optimization.
+        All four quantized loaders have distinct symbols to prevent AOT linkage
+        from mixing incompatible affine/FP or legacy/NAX implementations.
+        No hand edits; the corresponding dispatch mirrors
         (`quantized.cpp`, `steel_*.cpp`) are regenerated alongside.
+        SortedGatherQuantizedTailTests checks exact expert projections, partial
+        reduction/output tiles, packing widths and NaN rows across quantization modes.
       globs:
         - "Source/Cmlx/mlx-generated/**"
     - title: "Swift runtime surface"
@@ -109,10 +127,21 @@ def:
             byte OOM — freed buffers recycle into a size-keyed cache trimmed only by bytes).
             `AllocationFootprint` adds coherent accounting snapshots and checked footprint
             policy from the forked allocator so a serving engine can budget KV and weights
-            against real numbers.
+            against real numbers. `Memory+AllocationCap` exposes install-once Metal backing
+            enforcement and coherent cap snapshots through the GLMCalibration SPI. The core
+            owns page-aligned no-copy backing and returns credit only after its Metal
+            deallocator releases the pages; host memory and driver overhead are not capped.
+            The pinned core's footprint policy includes a VM-page minimum before
+            cache-reuse allowance for positive requests, covering page-backed
+            subpage buffers even for a policy captured before cap installation.
+            ALLOCATION-CAP.md distinguishes this per-buffer bound from cap credit
+            and host/OS budgets; zero and overflow handling remain unchanged.
           globs:
             - "Source/MLX/Memory.swift"
             - "Source/MLX/AllocationFootprint.swift"
+            - "Source/MLX/Memory+AllocationCap.swift"
+            - "ALLOCATION-CAP.md"
+            - "tools/check-process-allocation-cap.sh"
         - title: "Process-global default streams"
           description: |
             MLX 0.32 made the default stream's Metal command encoder thread-local, so any
@@ -139,11 +168,15 @@ def:
             11 s" — the first-token wedge smoking gun — even while a wedged eval holds the lock
             forever. `Transforms+Compile` fixes a compiled-function lock-order inversion found
             during verification, and `MLXArray.description` is wrapped in `evalLock`.
+            The Execution SPI shares that recursive lock with status-checking native
+            evaluation/fences, preventing transport intake from committing the global
+            Metal command buffer during a model evaluation.
           globs:
             - "Source/MLX/EvalProbe.swift"
             - "Source/MLX/Transforms+Eval.swift"
             - "Source/MLX/Transforms+Compile.swift"
             - "Source/MLX/MLXArray.swift"
+            - "Tests/MLXTests/NativeEvaluationSerializationTests.swift"
         - title: "Ops: median over all axes"
           description: |
             `median(_:keepDims:)` passed no axes to `mlx_median`, and MLX raised an error for every
@@ -217,11 +250,15 @@ def:
             upstream MLX does, so allowed positions are 0. `TransformerCausalMaskTests` covers it.
           globs:
             - "Source/MLXNN/Transformer.swift"
-        - title: "Custom Metal kernels: mutable inputs"
+        - title: "Custom Metal kernels: mutable inputs and explicit math modes"
           description: |
             Swift custom Metal kernels take a default-empty `mutableInputs` list, forwarded
             through the C API, declaring Metal write access on owned input buffers and
             forbidding implicit contiguous copies of them (needed by the Nemotron kernels).
+            `MLXFast.KernelMathMode` adds an explicit per-kernel safe, relaxed or fast
+            compiler mode. The default remains safe and retains the legacy constructors;
+            non-safe modes use the new C options entry point and need numerical qualification.
+            Both the MLX and compatibility MLXFast APIs retain mutable-input semantics.
           globs:
             - "Source/MLX/MLXFastKernel.swift"
             - "Source/MLXFast/MLXFastKernel.swift"
@@ -259,6 +296,29 @@ def:
             `TransformerDecoderLayerTests` covers it.
           globs:
             - "Source/MLXNN/Transformer.swift"
+        - title: "GPU: query the Metal device once without the window server"
+          description: |
+            `GPU.deviceInfo()` called `MTLCreateSystemDefaultDevice()` on every call. In a
+            command-line process, the first such call opens a window-server session, which
+            stalled for 7.1 s and 30.1 s on an M5 box. The value is now computed once per process,
+            from the first device of `MTLCopyAllDevices()`, which is the device that MLX's
+            `metal::load_device` selects. The system default device is the fallback when that
+            list is empty.
+          globs:
+            - "Source/MLX/GPU+Metal.swift"
+        - title: "GPU: thread-scoped command-buffer commit limits"
+          description: |
+            `GPU.withCommandBufferLimits(_:_:)` (with `GPU.CommandBufferLimits`) wraps the fork's
+            `mlx_metal_set_thread_command_buffer_limits` (header
+            `Source/Cmlx/include/mlx/command_buffer_limits.h`): command buffers encoded on the
+            calling thread commit after the given operation count or megabytes of distinct
+            inputs instead of the device defaults, and the previous limits are restored on exit.
+            A caller can give single-token decode steps larger buffers, so the CPU encodes
+            further ahead of the GPU, while prefill keeps the defaults and their memory bound.
+            Partitioning work into command buffers does not change results.
+          globs:
+            - "Source/MLX/GPU+Metal.swift"
+            - "Source/Cmlx/include/mlx/command_buffer_limits.h"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:
@@ -294,11 +354,37 @@ def:
         is not the merge-base with upstream, or when a file the fork changes is not described
         by a section above. `build-metallib.sh` builds the full MLX Metal library for the
         fork's test run in CI, because a SwiftPM command-line build compiles no Metal kernels.
+        `check-generated-metal-sources.py` checks copied Metal headers and complete declared
+        JIT sections against current nested core, with exact wrappers and source-hash receipts.
+        Its default gate covers affine and FP quantized kernels, including NAX. `--all` audits the broader
+        Metal tree and reports existing drift; it does not claim every generated source is
+        current. Static section reconstruction does not replace compiler include discovery,
+        full regeneration, or binary qualification. Mutation self-tests verify stale copied
+        and expanded bodies fail. This gate does not regenerate files.
+        CI coverage locates the MLX test-target bundle emitted by SwiftBuild or
+        the combined package-test bundle emitted by native SwiftPM, and refuses
+        a missing executable or profile before reporting instrumented Swift code.
+        CONTRIBUTING.md documents the full-FP32 test contract and the required
+        fresh-process allocation-cap check, distinct from the ordinary test pass.
       globs:
         - "scripts/check_forkdiff.py"
+        - "scripts/check-generated-metal-sources.py"
+        - "scripts/test-check-generated-metal-sources.py"
         - "scripts/build-metallib.sh"
         - "FORKDIFF.md"
+        - "CONTRIBUTING.md"
         - "README.md"
+
+    - title: "Bounded JACCL startup-wait header contract"
+      description: |
+        The mirrored distributed_group.h exposes the matching C begin/end API
+        for one finite startup wait on an initialized group. Callers drain queued
+        work and serialize transitions; deadlines cannot renew or reopen failed
+        groups. Core and C gitlinks must advance together to the reviewed
+        successors before building a consumer. The ordinary idle timeout,
+        allocation caps and authentication remain unchanged.
+      globs:
+        - "docs/startup-wait-budget.md"
 
 # ignored globally, does not count towards line count
 ignore:

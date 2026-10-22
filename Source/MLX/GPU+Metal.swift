@@ -221,13 +221,29 @@ public enum GPU {
     }
 
     /// Get information about the GPU device and system settings
+    ///
+    /// The value is computed once per process.
     public static func deviceInfo() -> DeviceInfo {
+        cachedDeviceInfo
+    }
+
+    private static let cachedDeviceInfo: DeviceInfo = {
         var mib = [CTL_HW, HW_MEMSIZE]
         var memSize: size_t = 0
         var length: size_t = MemoryLayout.size(ofValue: memSize)
         sysctl(&mib, 2, &memSize, &length, nil, 0)
 
-        if let device = MTLCreateSystemDefaultDevice() {
+        // Select the device the same way as MLX (metal::load_device): the first
+        // device of MTLCopyAllDevices(), else the system default device. In a
+        // command-line process MTLCreateSystemDefaultDevice() opens a window
+        // server session, which can stall for many seconds.
+        #if os(macOS)
+            let device = MTLCopyAllDevices().first ?? MTLCreateSystemDefaultDevice()
+        #else
+            let device = MTLCreateSystemDefaultDevice()
+        #endif
+
+        if let device {
             let architecture: String
             if #available(macOS 14.0, iOS 17.0, tvOS 17.0, *) {
                 architecture = device.architecture.name
@@ -244,7 +260,7 @@ public enum GPU {
                 architecture: "Unknown", maxBufferSize: 0, maxRecommendedWorkingSetSize: 0,
                 memorySize: memSize)
         }
-    }
+    }()
 
     /// Runtime state for the opt-in Gemma 4 sorted expert-QMM specialization.
     ///
@@ -323,4 +339,44 @@ public enum GPU {
         return Gemma4ExpertQMMDiagnostics(value)
     }
 
+}
+
+extension GPU {
+    /// Metal command-buffer commit limits: a buffer is committed once it holds
+    /// more than `operations` operations or more than `megabytes` of distinct
+    /// inputs and outputs (weights included). Zero or a negative value selects
+    /// the device default for that limit, also inside an outer scope. Limits
+    /// set here take precedence over `MLX_MAX_OPS_PER_BUFFER` and
+    /// `MLX_MAX_MB_PER_BUFFER`.
+    public struct CommandBufferLimits: Sendable, Equatable {
+        public var operations: Int
+        public var megabytes: Int
+
+        public init(operations: Int, megabytes: Int) {
+            self.operations = operations
+            self.megabytes = megabytes
+        }
+    }
+
+    /// Runs `body` with `limits` applied to the command buffers that this
+    /// thread encodes, then restores the thread's previous limits. Evaluation
+    /// encodes on the thread that calls `eval` or `asyncEval`, so `body` must
+    /// make that call itself. Results never depend on the partitioning;
+    /// larger buffers let the CPU encode further ahead of the GPU, and keep
+    /// each buffer's temporaries alive until the buffer completes, so very
+    /// large limits on large graphs raise peak memory.
+    public static func withCommandBufferLimits<R>(
+        _ limits: CommandBufferLimits, _ body: () throws -> R
+    ) rethrows -> R {
+        var previousOperations: Int32 = 0
+        var previousMegabytes: Int32 = 0
+        mlx_metal_set_thread_command_buffer_limits(
+            Int32(clamping: limits.operations), Int32(clamping: limits.megabytes),
+            &previousOperations, &previousMegabytes)
+        defer {
+            mlx_metal_set_thread_command_buffer_limits(
+                previousOperations, previousMegabytes, nil, nil)
+        }
+        return try body()
+    }
 }

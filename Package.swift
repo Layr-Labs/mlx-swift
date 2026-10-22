@@ -240,8 +240,9 @@ let cmlx = Target.target(
         // vendor docs
         "vendor-README.md",
 
-        // example code only (distributed C API now enabled)
+        // Standalone programs define main(); only the C library belongs here.
         "mlx-c/examples",
+        "mlx-c/tests",
 
         // vendored library, include header only
         "json",

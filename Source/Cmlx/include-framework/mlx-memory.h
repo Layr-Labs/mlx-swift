@@ -8,8 +8,14 @@
 #include <limits>
 
 #include <Cmlx/mlx-api.h>
+#include <Cmlx/mlx-backend-common-process_allocation_cap.h>
 
 namespace mlx::core {
+
+using ProcessAllocationCapSnapshot = allocator::ProcessAllocationCapSnapshot;
+// One-way, pristine-allocator installation. Not a whole-process/host limit.
+MLX_API void install_process_allocation_cap(size_t bytes);
+MLX_API ProcessAllocationCapSnapshot get_process_allocation_cap_snapshot();
 
 struct MemorySnapshot {
   size_t active_memory;
@@ -35,18 +41,27 @@ struct AllocationFootprintPolicy {
   size_t cache_page_size;
 
   bool upper_bound(size_t size, size_t& result) const noexcept {
-    if (size == 0) { result = 0; return true; }
-    if (alignment == 0 || cache_page_size == 0) { return false; }
+    if (size == 0) {
+      result = 0;
+      return true;
+    }
+    if (alignment == 0 || cache_page_size == 0) {
+      return false;
+    }
     size = std::max(size, minimum_allocation);
     if (power_of_two_below && size < power_of_two_below) {
       size_t rounded = 1;
       while (rounded < size) {
-        if (!add(rounded, rounded, rounded)) { return false; }
+        if (!add(rounded, rounded, rounded)) {
+          return false;
+        }
       }
       size = rounded;
     } else if (size > rounding_threshold) {
       auto remainder = size % alignment;
-      if (remainder && !add(size, alignment - remainder, size)) { return false; }
+      if (remainder && !add(size, alignment - remainder, size)) {
+        return false;
+      }
     }
     size_t two_pages;
     return add(cache_page_size, cache_page_size, two_pages) &&
@@ -55,10 +70,13 @@ struct AllocationFootprintPolicy {
 
   // For any positive n with a valid bound, B(n) <= n + this overhead.
   bool maximum_extra_bytes(size_t& result) const noexcept {
-    if (alignment == 0 || cache_page_size == 0) { return false; }
-    auto normalization = std::max({alignment - 1,
-        minimum_allocation ? minimum_allocation - 1 : 0,
-        power_of_two_below ? power_of_two_below - 1 : 0});
+    if (alignment == 0 || cache_page_size == 0) {
+      return false;
+    }
+    auto normalization = std::max(
+        {alignment - 1,
+         minimum_allocation ? minimum_allocation - 1 : 0,
+         power_of_two_below ? power_of_two_below - 1 : 0});
     size_t two_pages;
     return add(cache_page_size, cache_page_size, two_pages) &&
         add(normalization, two_pages - 1, result);
@@ -66,7 +84,9 @@ struct AllocationFootprintPolicy {
 
  private:
   static bool add(size_t a, size_t b, size_t& result) noexcept {
-    if (b > std::numeric_limits<size_t>::max() - a) { return false; }
+    if (b > std::numeric_limits<size_t>::max() - a) {
+      return false;
+    }
     result = a + b;
     return true;
   }
@@ -159,5 +179,4 @@ MLX_API void clear_cache();
 MLX_API size_t set_wired_limit(size_t limit);
 
 } // namespace mlx::core
-
 #endif

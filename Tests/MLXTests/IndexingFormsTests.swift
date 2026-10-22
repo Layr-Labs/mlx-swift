@@ -12,7 +12,6 @@ import XCTest
 class IndexingFormsTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     /// The source array: value at [i, j, k] is i * 12 + j * 4 + k.

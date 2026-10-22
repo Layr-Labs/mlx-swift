@@ -12,10 +12,9 @@ import XCTest
 /// and plain ops, one time step at a time. Other tests check output shapes,
 /// that seeded weights give the same output, and that the state can be carried
 /// from one call to the next.
-class RecurrentTests: XCTestCase {
+class RecurrentLayerTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     private let inputSize = 3

@@ -66,7 +66,6 @@ private func opsCorrelate2D(
 class OpsCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - Arithmetic

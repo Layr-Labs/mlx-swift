@@ -9,7 +9,6 @@ import XCTest
 class FactoryCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - zeros and ones

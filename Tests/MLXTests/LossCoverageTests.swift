@@ -10,7 +10,6 @@ import XCTest
 class LossCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - Helpers

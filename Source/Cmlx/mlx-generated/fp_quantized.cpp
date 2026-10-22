@@ -98,11 +98,11 @@ struct fp8_e4m3 {
   }
 
   operator float16_t() thread {
-    uint16_t v = (bits & 127) << 7;
-    half converted = as_type<half>(v);
-    converted *= 256.0;
-    auto sign = bits & 128;
-    return (sign ? -converted : converted);
+    uint16_t v = bits & 127;
+    uint16_t sign_bit = ((uint16_t)((bits >> 7) & 1)) << 15;
+    uint16_t u = (v << 7) | (((v + 1) >> 7) << 14) | sign_bit;
+    half converted = as_type<half>(u);
+    return converted * 256.0;
   }
 
   operator bfloat16_t() thread {
@@ -299,13 +299,12 @@ inline void qouter(const thread uint8_t* w, U x, U scale, thread U* result) {
 }
 
 template <typename U, int bits>
-inline void dequantize(uint8_t w, U scale, threadgroup U* w_local) {
-  const float s = float(scale);
+inline void dequantize(uint8_t w, float scale, threadgroup U* w_local) {
   if constexpr (bits == 4) {
-    w_local[0] = static_cast<U>(s * Dequantize<4, float>{}(w));
-    w_local[1] = static_cast<U>(s * Dequantize<4, float>{}(w >> 4));
+    w_local[0] = static_cast<U>(scale * Dequantize<4, float>{}(w));
+    w_local[1] = static_cast<U>(scale * Dequantize<4, float>{}(w >> 4));
   } else {
-    w_local[0] = static_cast<U>(s * Dequantize<8, float>{}(w));
+    w_local[0] = static_cast<U>(scale * Dequantize<8, float>{}(w));
   }
 }
 
@@ -317,7 +316,8 @@ template <
     short reduction_dim,
     short tgp_size,
     short group_size,
-    short bits>
+    short bits,
+    bool has_global_scale = false>
 struct FPQuantizedBlockLoader {
   MLX_MTL_CONST short pack_factor = get_fp_pack_factor<8, bits>();
   MLX_MTL_CONST short bytes_per_pack = get_bytes_per_pack();
@@ -327,9 +327,14 @@ struct FPQuantizedBlockLoader {
   MLX_MTL_CONST short group_steps = group_size < BCOLS ? 1 : group_size / BCOLS;
   MLX_MTL_CONST short scale_step = group_size < BCOLS ? BCOLS / group_size : 1;
 
+  MLX_MTL_CONST bool partial_cols = group_size % BCOLS != 0;
+
   static_assert(
       (n_reads * pack_factor) <= group_size,
       "The number of reads per thread must be less than the group size.");
+  static_assert(
+      group_size % (n_reads * pack_factor) == 0,
+      "The group size must be a multiple of the columns read per thread.");
 
   const int src_ld;
   const int tile_stride;
@@ -343,6 +348,9 @@ struct FPQuantizedBlockLoader {
   threadgroup T* dst;
   const device uint8_t* src;
   const device uint8_t* scales;
+  // nvfp4 tensor scale, folded into the group scale as fp_dequantize does.
+  // Kept in float: it is ~1e-5, so in fp16 small scales lose most bits.
+  float inv_scale_enc = 1.0f;
 
   FPQuantizedBlockLoader(
       const device uint8_t* src_,
@@ -350,7 +358,8 @@ struct FPQuantizedBlockLoader {
       const int src_ld_,
       threadgroup T* dst_,
       ushort simd_group_id [[simdgroup_index_in_threadgroup]],
-      ushort simd_lane_id [[thread_index_in_simdgroup]]) thread
+      ushort simd_lane_id [[thread_index_in_simdgroup]],
+      const device float* global_scale = nullptr) thread
       : src_ld(src_ld_),
         tile_stride(
             reduction_dim ? BCOLS_PACKED* bytes_per_pack
@@ -365,14 +374,19 @@ struct FPQuantizedBlockLoader {
             bj * bytes_per_pack),
         scales(
             scales_ + bi * src_ld / group_size +
-            (bj * pack_factor) / group_size) {}
+            (bj * pack_factor) / group_size) {
+    if constexpr (has_global_scale) {
+      inv_scale_enc = *global_scale / (F8E4M3_MAX * F4E2M1_MAX);
+    }
+  }
 
   void load_unsafe() const thread {
     if (BCOLS_PACKED * BROWS < tgp_size && bi >= BROWS) {
       return;
     }
 
-    T scale = dequantize_scale<T, group_size>(*scales);
+    float scale =
+        float(dequantize_scale<T, group_size>(*scales)) * inv_scale_enc;
     for (int i = 0; i < n_reads; i++) {
       dequantize<T, bits>(
           src[i * bytes_per_pack], scale, dst + i * pack_factor);
@@ -391,7 +405,8 @@ struct FPQuantizedBlockLoader {
       return;
     }
 
-    T scale = dequantize_scale<T, group_size>(*scales);
+    float scale =
+        float(dequantize_scale<T, group_size>(*scales)) * inv_scale_enc;
     for (int i = 0; i < n_reads; i++) {
       if ((bj + i) * pack_factor < src_tile_dim.x) {
         dequantize<T, bits>(
@@ -421,6 +436,95 @@ struct FPQuantizedBlockLoader {
     }
   }
 };
+
+template <
+    short BROWS,
+    short BCOLS,
+    short dst_ld,
+    short tgp_size,
+    short group_size>
+struct Fp4HalfLoader {
+  MLX_MTL_CONST short BCOLS_PACKED = BCOLS / 2;
+  MLX_MTL_CONST short n_reads = (BCOLS_PACKED * BROWS) / tgp_size;
+  MLX_MTL_CONST short n_words = n_reads / 4;
+
+  static_assert(
+      n_reads == 4 || n_reads == 8,
+      "Each thread reads one or two words of one group");
+  static_assert(BCOLS % group_size == 0, "The block holds whole groups");
+
+  const int src_ld;
+  const short bi;
+  const short bj;
+
+  threadgroup half* dst;
+  const device uint8_t* src;
+  const device uint8_t* scales;
+
+  Fp4HalfLoader(
+      const device uint8_t* src_,
+      const device uint8_t* scales_,
+      const int src_ld_,
+      threadgroup half* dst_,
+      ushort simd_group_id [[simdgroup_index_in_threadgroup]],
+      ushort simd_lane_id [[thread_index_in_simdgroup]],
+      const device float* global_scale = nullptr) thread
+      : src_ld(src_ld_),
+        bi(n_reads*(simd_group_id * 32 + simd_lane_id) / BCOLS_PACKED),
+        bj((n_reads * (simd_group_id * 32 + simd_lane_id)) % BCOLS_PACKED),
+        dst(dst_ + bi * dst_ld + 2 * bj),
+        src(src_ + bi * src_ld / 2 + bj),
+        scales(scales_ + bi * src_ld / group_size + 2 * bj / group_size) {
+    (void)global_scale;
+  }
+
+  void load_unsafe() const thread {
+    const half2 s = half2(dequantize_scale<half, group_size>(*scales));
+    for (short i = 0; i < n_words; i++) {
+      const uint q = ((const device uint*)src)[i];
+      half2 v0 =
+          as_type<half2>(((q & 0x00070007) << 9) | ((q & 0x00080008) << 12));
+      half2 v1 =
+          as_type<half2>(((q & 0x00700070) << 5) | ((q & 0x00800080) << 8));
+      half2 v2 =
+          as_type<half2>(((q & 0x07000700) << 1) | ((q & 0x08000800) << 4));
+      half2 v3 = as_type<half2>(((q & 0x70007000) >> 3) | (q & 0x80008000));
+      v0 = (v0 * half2(16384.0h)) * s;
+      v1 = (v1 * half2(16384.0h)) * s;
+      v2 = (v2 * half2(16384.0h)) * s;
+      v3 = (v3 * half2(16384.0h)) * s;
+      *(threadgroup uint4*)(dst + 8 * i) = uint4(
+          as_type<uint>(half2(v0.x, v1.x)),
+          as_type<uint>(half2(v2.x, v3.x)),
+          as_type<uint>(half2(v0.y, v1.y)),
+          as_type<uint>(half2(v2.y, v3.y)));
+    }
+  }
+
+  void load_safe(short2 src_tile_dim) const thread {
+    if (bi < src_tile_dim.y && 2 * bj < src_tile_dim.x) {
+      load_unsafe();
+    } else {
+      for (short i = 0; i < n_words; i++) {
+        *(threadgroup uint4*)(dst + 8 * i) = uint4(0);
+      }
+    }
+  }
+
+  void next() thread {
+    src += BCOLS_PACKED;
+    scales += BCOLS / group_size;
+  }
+};
+
+// Use Fp4HalfLoader when dequantizing fp4 into half. Also use it for
+// dequantizing nvfp4 into bfloat16, which has no loss.
+template <typename T, int group_size, int bits, bool has_global_scale>
+inline constexpr bool use_fp4_half_loader() {
+  return !has_global_scale &&
+      ((metal::is_same_v<T, half> && bits == 4) ||
+       (metal::is_same_v<T, bfloat16_t> && bits == 4 && group_size == 16));
+}
 
 template <typename T, int group_size, int bits, int D>
 METAL_FUNC void fp_qmv_quad_impl(
@@ -488,6 +592,7 @@ template <
     typename T,
     int group_size,
     int bits,
+    bool partial_rows = false,
     bool has_global_scale = false,
     int results_per_simdgroup = 4,
     bool allow_aligned_tail = false>
@@ -522,6 +627,15 @@ METAL_FUNC void fp_qmv_fast_impl(
   const int out_row = tid.y * (num_simdgroups * results_per_simdgroup) +
       simd_gid * results_per_simdgroup;
 
+  // Reuse the last valid row for reads beyond the output tile.
+  int last_row = results_per_simdgroup - 1;
+  if constexpr (partial_rows) {
+    if (out_row >= out_vec_size) {
+      return;
+    }
+    last_row = min(last_row, out_vec_size - 1 - out_row);
+  }
+
   ws += out_row * in_vec_size_w + simd_lid * packs_per_thread * bytes_per_pack;
   scales += out_row * in_vec_size_g + simd_lid / scale_step_per_thread;
   x += tid.x * in_vec_size + simd_lid * values_per_thread;
@@ -534,8 +648,12 @@ METAL_FUNC void fp_qmv_fast_impl(
     load_vector<T, U, values_per_thread>(x, x_thread);
 
     for (int row = 0; row < results_per_simdgroup; row++) {
-      auto wl = (const device uint8_t*)(ws + row * in_vec_size_w);
-      const device auto* sl = scales + row * in_vec_size_g;
+      int src = row;
+      if constexpr (partial_rows) {
+        src = min(row, last_row);
+      }
+      auto wl = (const device uint8_t*)(ws + src * in_vec_size_w);
+      const device auto* sl = scales + src * in_vec_size_g;
 
       U s = dequantize_scale<U, group_size>(sl[0]);
       result[row] += qdot<U, values_per_thread, bits>(wl, x_thread, s);
@@ -552,8 +670,12 @@ METAL_FUNC void fp_qmv_fast_impl(
     if (int(simd_lid) * values_per_thread < tail_values) {
       load_vector<T, U, values_per_thread>(x, x_thread);
       for (int row = 0; row < results_per_simdgroup; row++) {
-        const device uint8_t* wl = ws + row * in_vec_size_w;
-        const device uint8_t* sl = scales + row * in_vec_size_g;
+        int src = row;
+        if constexpr (partial_rows) {
+          src = min(row, last_row);
+        }
+        const device uint8_t* wl = ws + src * in_vec_size_w;
+        const device uint8_t* sl = scales + src * in_vec_size_g;
         U scale = dequantize_scale<U, group_size>(sl[0]);
         result[row] += qdot<U, values_per_thread, bits>(wl, x_thread, scale);
       }
@@ -567,7 +689,7 @@ METAL_FUNC void fp_qmv_fast_impl(
 
   for (int row = 0; row < results_per_simdgroup; row++) {
     result[row] = simd_sum(result[row]);
-    if (simd_lid == 0) {
+    if (simd_lid == 0 && row <= last_row) {
       if constexpr (has_global_scale) {
         y[row] = static_cast<T>(result[row] * inv_scale_enc);
       } else {
@@ -968,16 +1090,20 @@ template <
     const int group_size,
     const int bits,
     const bool aligned_N,
+    typename U = T,
+    const bool has_global_scale = false,
     const int BM = 32,
     const int BK = 32,
-    const int BN = 32>
+    const int BN = 32,
+    typename TW>
 METAL_FUNC void fp_qmm_t_impl(
     const device uint32_t* w,
     const device uint8_t* scales,
+    const device float* global_scale,
     const device T* x,
-    device T* y,
+    device U* y,
     threadgroup T* Xs,
-    threadgroup T* Ws,
+    threadgroup TW* Ws,
     const constant int& K,
     const constant int& N,
     const constant int& M,
@@ -1000,18 +1126,23 @@ METAL_FUNC void fp_qmm_t_impl(
 
   // Instantiate the appropriate BlockMMA and Loader
   using mma_t = mlx::steel::
-      BlockMMA<T, T, BM, BN, BK, WM, WN, false, true, BK_padded, BK_padded>;
+      BlockMMA<T, U, BM, BN, BK, WM, WN, false, true, BK_padded, BK_padded>;
   using loader_x_t =
       mlx::steel::BlockLoader<T, BM, BK, BK_padded, 1, WM * WN * SIMD_SIZE>;
-  using loader_w_t = FPQuantizedBlockLoader<
-      T,
-      BN,
-      BK,
-      BK_padded,
-      1,
-      WM * WN * SIMD_SIZE,
-      group_size,
-      bits>;
+  // Use shortcut when loading fp4 quants to half weights
+  using loader_w_t = metal::conditional_t<
+      metal::is_same_v<TW, half> && (bits == 4) && !has_global_scale,
+      Fp4HalfLoader<BN, BK, BK_padded, WM * WN * SIMD_SIZE, group_size>,
+      FPQuantizedBlockLoader<
+          T,
+          BN,
+          BK,
+          BK_padded,
+          1,
+          WM * WN * SIMD_SIZE,
+          group_size,
+          bits,
+          has_global_scale>>;
 
   // Set the block
   const int K_w = K * bytes_per_pack / pack_factor;
@@ -1030,12 +1161,15 @@ METAL_FUNC void fp_qmm_t_impl(
   const short num_els = min(BM, M - y_row);
   const short num_outs = min(BN, N - y_col);
   loader_x_t loader_x(x, K, Xs, simd_gid, simd_lid);
-  loader_w_t loader_w(wl, scales, K, Ws, simd_gid, simd_lid);
+  loader_w_t loader_w(wl, scales, K, Ws, simd_gid, simd_lid, global_scale);
   mma_t mma_op(simd_gid, simd_lid);
 
+  constexpr bool partial_k = group_size % BK != 0;
+  const int k_blocks = K_eff / BK;
+  const short num_k = partial_k ? short(K_eff - k_blocks * BK) : short(0);
   if (num_els < BM) {
     if (!aligned_N && num_outs < BN) {
-      for (int k = 0; k < K_eff; k += BK) {
+      for (int k = 0; k < k_blocks; k++) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         loader_x.load_safe(short2(BK, num_els));
         loader_w.load_safe(short2(BK, num_outs));
@@ -1045,7 +1179,7 @@ METAL_FUNC void fp_qmm_t_impl(
         loader_w.next();
       }
     } else {
-      for (int k = 0; k < K_eff; k += BK) {
+      for (int k = 0; k < k_blocks; k++) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         loader_x.load_safe(short2(BK, num_els));
         loader_w.load_unsafe();
@@ -1055,9 +1189,18 @@ METAL_FUNC void fp_qmm_t_impl(
         loader_w.next();
       }
     }
+    if constexpr (partial_k) {
+      if (num_k > 0) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        loader_x.load_safe(short2(num_k, num_els));
+        loader_w.load_safe(short2(num_k, num_outs));
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        mma_op.mma(Xs, Ws);
+      }
+    }
   } else {
     if (!aligned_N && num_outs < BN) {
-      for (int k = 0; k < K_eff; k += BK) {
+      for (int k = 0; k < k_blocks; k++) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         loader_x.load_unsafe();
         loader_w.load_safe(short2(BK, num_outs));
@@ -1067,7 +1210,7 @@ METAL_FUNC void fp_qmm_t_impl(
         loader_w.next();
       }
     } else {
-      for (int k = 0; k < K_eff; k += BK) {
+      for (int k = 0; k < k_blocks; k++) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         loader_x.load_unsafe();
         loader_w.load_unsafe();
@@ -1076,6 +1219,15 @@ METAL_FUNC void fp_qmm_t_impl(
         mma_op.mma(Xs, Ws);
         loader_x.next();
         loader_w.next();
+      }
+    }
+    if constexpr (partial_k) {
+      if (num_k > 0) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        loader_x.load_safe(short2(num_k, BM));
+        loader_w.load_safe(short2(num_k, num_outs));
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        mma_op.mma(Xs, Ws);
       }
     }
   }
@@ -1093,12 +1245,14 @@ template <
     typename T,
     int group_size,
     int bits,
+    bool has_global_scale = false,
     int BM = 32,
     int BK = 32,
     int BN = 32>
 METAL_FUNC void fp_qmm_n_impl(
     const device uint32_t* w,
     const device uint8_t* scales,
+    const device float* global_scale,
     const device T* x,
     device T* y,
     threadgroup T* Xs,
@@ -1136,7 +1290,8 @@ METAL_FUNC void fp_qmm_n_impl(
       0,
       WM * WN * SIMD_SIZE,
       group_size,
-      bits>;
+      bits,
+      has_global_scale>;
 
   auto wl = (const device uint8_t*)w;
 
@@ -1151,8 +1306,11 @@ METAL_FUNC void fp_qmm_n_impl(
   // Make the x loader and mma operation
   const short num_els = min(BM, M - y_row);
   loader_x_t loader_x(x, K, Xs, simd_gid, simd_lid);
-  loader_w_t loader_w(wl, scales, N, Ws, simd_gid, simd_lid);
+  loader_w_t loader_w(wl, scales, N, Ws, simd_gid, simd_lid, global_scale);
   mma_t mma_op(simd_gid, simd_lid);
+
+  constexpr bool partial_n = group_size % BN != 0;
+  const short num_outs = partial_n ? short(min(BN, N - y_col)) : short(BN);
 
   if (num_els < BM) {
     if ((K % BK) != 0) {
@@ -1160,7 +1318,11 @@ METAL_FUNC void fp_qmm_n_impl(
       for (int k = 0; k < k_blocks; k++) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         loader_x.load_safe(short2(BK, num_els));
-        loader_w.load_unsafe();
+        if constexpr (partial_n) {
+          loader_w.load_safe(short2(num_outs, BK));
+        } else {
+          loader_w.load_unsafe();
+        }
         threadgroup_barrier(mem_flags::mem_threadgroup);
         mma_op.mma(Xs, Ws);
         loader_x.next();
@@ -1169,9 +1331,19 @@ METAL_FUNC void fp_qmm_n_impl(
       const short num_k = K - k_blocks * BK;
       threadgroup_barrier(mem_flags::mem_threadgroup);
       loader_x.load_safe(short2(num_k, num_els));
-      loader_w.load_safe(short2(BN, num_k));
+      loader_w.load_safe(short2(num_outs, num_k));
       threadgroup_barrier(mem_flags::mem_threadgroup);
       mma_op.mma(Xs, Ws);
+    } else if (num_outs < BN) {
+      for (int k = 0; k < K; k += BK) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        loader_x.load_safe(short2(BK, num_els));
+        loader_w.load_safe(short2(num_outs, BK));
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        mma_op.mma(Xs, Ws);
+        loader_x.next();
+        loader_w.next();
+      }
     } else {
       for (int k = 0; k < K; k += BK) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1189,7 +1361,11 @@ METAL_FUNC void fp_qmm_n_impl(
       for (int k = 0; k < k_blocks; k++) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         loader_x.load_unsafe();
-        loader_w.load_unsafe();
+        if constexpr (partial_n) {
+          loader_w.load_safe(short2(num_outs, BK));
+        } else {
+          loader_w.load_unsafe();
+        }
         threadgroup_barrier(mem_flags::mem_threadgroup);
         mma_op.mma(Xs, Ws);
         loader_x.next();
@@ -1198,9 +1374,19 @@ METAL_FUNC void fp_qmm_n_impl(
       const short num_k = K - k_blocks * BK;
       threadgroup_barrier(mem_flags::mem_threadgroup);
       loader_x.load_safe(short2(num_k, BM));
-      loader_w.load_safe(short2(BN, num_k));
+      loader_w.load_safe(short2(num_outs, num_k));
       threadgroup_barrier(mem_flags::mem_threadgroup);
       mma_op.mma(Xs, Ws);
+    } else if (num_outs < BN) {
+      for (int k = 0; k < K; k += BK) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        loader_x.load_unsafe();
+        loader_w.load_safe(short2(num_outs, BK));
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        mma_op.mma(Xs, Ws);
+        loader_x.next();
+        loader_w.next();
+      }
     } else {
       for (int k = 0; k < K; k += BK) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1216,8 +1402,8 @@ METAL_FUNC void fp_qmm_n_impl(
 
   // Store results to device memory
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  if (num_els < BM) {
-    mma_op.store_result_safe(y, N, short2(BN, num_els));
+  if (num_els < BM || num_outs < BN) {
+    mma_op.store_result_safe(y, N, short2(num_outs, num_els));
   } else {
     mma_op.store_result(y, N);
   }
@@ -1258,11 +1444,12 @@ METAL_FUNC void adjust_matrix_offsets(
   y += tid.z * output_stride;
 }
 
-template <typename T>
+template <bool has_global_scale, typename T>
 METAL_FUNC void adjust_matrix_offsets(
     const device T*& x,
     const device uint32_t*& w,
     const device uint8_t*& scales,
+    const device float*& global_scale,
     const device uint32_t* lhs_indices,
     const device uint32_t* rhs_indices,
     device T*& y,
@@ -1304,6 +1491,10 @@ METAL_FUNC void adjust_matrix_offsets(
         w_idx, w_shape, w_strides, s_strides, w_batch_ndims);
     w += idx.x;
     scales += idx.y;
+  }
+  // One global scale per expert, contiguous over the batch dims of w.
+  if constexpr (has_global_scale) {
+    global_scale += w_idx;
   }
   y += tid.z * output_stride;
 }
@@ -1352,6 +1543,7 @@ template <
     int group_size,
     int bits,
     bool batched,
+    bool partial_rows = false,
     bool has_global_scale = false,
     int results_per_simdgroup = 4>
 [[kernel]] void fp_qmv_fast(
@@ -1393,6 +1585,7 @@ template <
       T,
       group_size,
       bits,
+      partial_rows,
       has_global_scale,
       results_per_simdgroup>(
       w,
@@ -1412,6 +1605,7 @@ template <
     int group_size,
     int bits,
     bool batched,
+    bool partial_rows = false,
     bool has_global_scale = false,
     int results_per_simdgroup = 4>
 [[kernel]] void fp_qmv(
@@ -1505,6 +1699,201 @@ template <
   }
   fp_qmv_wide_impl<T, group_size, bits, vecs_per_tg, k_lanes>(
       w, scales, x, y, in_vec_size, out_vec_size, M, tid, simd_gid, simd_lid);
+}
+
+template <
+    typename T,
+    int group_size,
+    int bits,
+    int WK = 8,
+    int BN = 32,
+    int TM = 1>
+[[kernel]] void fp_qmv_mma(
+    const device uint32_t* w,
+    const device uint8_t* scales,
+    const device T* x,
+    device T* y,
+    const constant int& K,
+    const constant int& N,
+    const constant int& M,
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint simd_gid [[simdgroup_index_in_threadgroup]],
+    uint simd_lid [[thread_index_in_simdgroup]]) {
+  static_assert(BN % 8 == 0, "BN should be divisible by 8");
+  static_assert(TM == 1 || TM == 2, "qmv_mma takes at most 16 rows");
+  static_assert(
+      (group_size == 16 && bits == 4) ||
+          (group_size == 32 && (bits == 4 || bits == 8)),
+      "qmv_mma reads nvfp4, mxfp4 and mxfp8");
+
+  using Frag = mlx::steel::BaseMMAFrag<float, 8, 8>;
+  using frag_t = typename Frag::frag_type;
+  using scale_t = metal::conditional_t<group_size == 16, half2, float>;
+  constexpr int BK = 128;
+  constexpr short TN = BN / 8;
+  constexpr int pack_factor = 8 / bits;
+  constexpr short loads = bits / 4;
+
+  const short2 coord = Frag::get_coord(simd_lid);
+  const short fn = coord.x;
+  const short fm = coord.y;
+  const int row_bytes = K / pack_factor;
+  const int row_scales = K / group_size;
+
+  const int y_col = tid.x * BN;
+  auto wl = (const device uint8_t*)w +
+      (y_col + fm) * static_cast<int64_t>(row_bytes) + 16 * fn / pack_factor;
+  scales +=
+      (y_col + fm) * static_cast<int64_t>(row_scales) + 16 * fn / group_size;
+  x += fn * static_cast<int64_t>(K) + 16 * fm;
+
+  bool x_rows[TM][2];
+  frag_t C[TN][TM];
+  STEEL_PRAGMA_UNROLL
+  for (short mt = 0; mt < TM; mt++) {
+    STEEL_PRAGMA_UNROLL
+    for (short j = 0; j < 2; j++) {
+      x_rows[mt][j] = 8 * mt + fn + j < M;
+    }
+    STEEL_PRAGMA_UNROLL
+    for (short t = 0; t < TN; t++) {
+      C[t][mt] = frag_t(0);
+    }
+  }
+
+  for (int k = simd_gid * BK; k < K; k += WK * BK) {
+    vec<T, 8> xs[TM][2][2];
+    STEEL_PRAGMA_UNROLL
+    for (short mt = 0; mt < TM; mt++) {
+      STEEL_PRAGMA_UNROLL
+      for (short j = 0; j < 2; j++) {
+        const device T* xr = x + (8 * mt + j) * static_cast<int64_t>(K) + k;
+        STEEL_PRAGMA_UNROLL
+        for (short h = 0; h < 2; h++) {
+          xs[mt][j][h] = x_rows[mt][j] ? *(const device vec<T, 8>*)(xr + 8 * h)
+                                       : vec<T, 8>(0);
+        }
+      }
+    }
+    uint4 ws[TN][loads];
+    scale_t sc[TN];
+    STEEL_PRAGMA_UNROLL
+    for (short t = 0; t < TN; t++) {
+      const device uint8_t* wt =
+          wl + 8 * t * static_cast<int64_t>(row_bytes) + k / pack_factor;
+      STEEL_PRAGMA_UNROLL
+      for (short l = 0; l < loads; l++) {
+        ws[t][l] = *(const device uint4*)(wt + 16 * l);
+      }
+      const device uint8_t* st =
+          scales + 8 * t * static_cast<int64_t>(row_scales) + k / group_size;
+      if constexpr (group_size == 16) {
+        const ushort s = *(const device ushort*)st;
+        sc[t] = half2(
+            dequantize_scale<half, group_size>(s & 0xff),
+            dequantize_scale<half, group_size>(s >> 8));
+      } else {
+        sc[t] = dequantize_scale<float, group_size>(*st) *
+            (bits == 4 ? 16384.0f : 256.0f);
+      }
+    }
+
+    STEEL_PRAGMA_UNROLL
+    for (short g = 0; g < 4; g++) {
+      frag_t b[4][TM];
+      STEEL_PRAGMA_UNROLL
+      for (short i = 0; i < 4; i++) {
+        const short f = 4 * g + i;
+        STEEL_PRAGMA_UNROLL
+        for (short mt = 0; mt < TM; mt++) {
+          b[i][mt] = frag_t(
+              float(xs[mt][0][f / 8][f % 8]), float(xs[mt][1][f / 8][f % 8]));
+        }
+      }
+      STEEL_PRAGMA_UNROLL
+      for (short t = 0; t < TN; t++) {
+        uint p[4];
+        if constexpr (bits == 4) {
+          const uint lo = ws[t][0][g / 2];
+          const uint hi = ws[t][0][2 + g / 2];
+          const uint q = (g % 2) == 0 ? (lo & 0xffff) | (hi << 16)
+                                      : (lo >> 16) | (hi & 0xffff0000);
+          p[0] = ((q & 0x00070007) << 9) | ((q & 0x00080008) << 12);
+          p[1] = ((q & 0x00700070) << 5) | ((q & 0x00800080) << 8);
+          p[2] = ((q & 0x07000700) << 1) | ((q & 0x08000800) << 4);
+          p[3] = ((q & 0x70007000) >> 3) | (q & 0x80008000);
+        } else {
+          STEEL_PRAGMA_UNROLL
+          for (short i = 0; i < 4; i++) {
+            const uint q = ((ws[t][0][g] >> (8 * i)) & 0xff) |
+                (((ws[t][1][g] >> (8 * i)) & 0xff) << 16);
+            p[i] = ((q & 0x00800080) << 8) | ((q & 0x007f007f) << 7);
+          }
+        }
+        STEEL_PRAGMA_UNROLL
+        for (short i = 0; i < 4; i++) {
+          frag_t a;
+          if constexpr (group_size == 16) {
+            const half2 v = (as_type<half2>(p[i]) * half2(16384.0h)) * sc[t];
+            a = frag_t(float(v.x), float(v.y));
+          } else {
+            const half2 v = as_type<half2>(p[i]);
+            a = frag_t(float(v.x) * sc[t], float(v.y) * sc[t]);
+          }
+          STEEL_PRAGMA_UNROLL
+          for (short mt = 0; mt < TM; mt++) {
+            Frag::mma(C[t][mt], a, b[i][mt], C[t][mt]);
+          }
+        }
+      }
+    }
+  }
+
+  constexpr int tile_elems = TN * TM * 2;
+  threadgroup float Ps[(WK - 1) * tile_elems * 32];
+  if (simd_gid > 0) {
+    threadgroup float* p = Ps + (simd_gid - 1) * tile_elems * 32 + simd_lid;
+    STEEL_PRAGMA_UNROLL
+    for (short t = 0; t < TN; t++) {
+      STEEL_PRAGMA_UNROLL
+      for (short mt = 0; mt < TM; mt++) {
+        STEEL_PRAGMA_UNROLL
+        for (short j = 0; j < 2; j++) {
+          p[((t * TM + mt) * 2 + j) * 32] = C[t][mt][j];
+        }
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (simd_gid == 0) {
+    for (int s = 0; s < WK - 1; s++) {
+      const threadgroup float* p = Ps + s * tile_elems * 32 + simd_lid;
+      STEEL_PRAGMA_UNROLL
+      for (short t = 0; t < TN; t++) {
+        STEEL_PRAGMA_UNROLL
+        for (short mt = 0; mt < TM; mt++) {
+          STEEL_PRAGMA_UNROLL
+          for (short j = 0; j < 2; j++) {
+            C[t][mt][j] += p[((t * TM + mt) * 2 + j) * 32];
+          }
+        }
+      }
+    }
+    STEEL_PRAGMA_UNROLL
+    for (short mt = 0; mt < TM; mt++) {
+      STEEL_PRAGMA_UNROLL
+      for (short j = 0; j < 2; j++) {
+        if (x_rows[mt][j]) {
+          device T* yr =
+              y + (8 * mt + fn + j) * static_cast<int64_t>(N) + y_col + fm;
+          STEEL_PRAGMA_UNROLL
+          for (short t = 0; t < TN; t++) {
+            yr[8 * t] = static_cast<T>(C[t][mt][j]);
+          }
+        }
+      }
+    }
+  }
 }
 
 template <
@@ -1620,16 +2009,18 @@ template <typename T, const int group_size, int bits, int split_k = 32>
 
 template <
     typename T,
-    const int group_size,
-    const int bits,
-    const bool aligned_N,
-    const bool batched,
-    const int BM = 32,
-    const int BK = 32,
-    const int BN = 32>
+    int group_size,
+    int bits,
+    bool aligned_N,
+    bool batched,
+    bool has_global_scale = false,
+    int BM = 32,
+    int BK = 32,
+    int BN = 32>
 [[kernel]] void fp_qmm_t(
     const device uint32_t* w,
     const device uint8_t* scales,
+    const device float* global_scale,
     const device T* x,
     device T* y,
     const constant int& K,
@@ -1649,9 +2040,13 @@ template <
   (void)lid;
 
   constexpr int BK_padded = (BK + 16 / sizeof(T));
+  using TW = metal::conditional_t<
+      use_fp4_half_loader<T, group_size, bits, has_global_scale>(),
+      half,
+      T>;
 
   threadgroup T Xs[BM * BK_padded];
-  threadgroup T Ws[BN * BK_padded];
+  threadgroup TW Ws[BN * BK_padded];
 
   if (batched) {
     adjust_matrix_offsets(
@@ -1669,8 +2064,31 @@ template <
         s_strides,
         tid);
   }
-  fp_qmm_t_impl<T, group_size, bits, aligned_N, BM, BK, BN>(
-      w, scales, x, y, Xs, Ws, K, N, M, K, tid, lid, simd_gid, simd_lid);
+  fp_qmm_t_impl<
+      T,
+      group_size,
+      bits,
+      aligned_N,
+      T,
+      has_global_scale,
+      BM,
+      BK,
+      BN>(
+      w,
+      scales,
+      global_scale,
+      x,
+      y,
+      Xs,
+      Ws,
+      K,
+      N,
+      M,
+      K,
+      tid,
+      lid,
+      simd_gid,
+      simd_lid);
 }
 
 template <
@@ -1726,8 +2144,8 @@ template <
         tid);
   }
 
-  fp_qmm_n_impl<T, group_size, bits, BM, BK, BN>(
-      w, scales, x, y, Xs, Ws, K, N, M, tid, lid, simd_gid, simd_lid);
+  fp_qmm_n_impl<T, group_size, bits, false, BM, BK, BN>(
+      w, scales, nullptr, x, y, Xs, Ws, K, N, M, tid, lid, simd_gid, simd_lid);
 }
 
 template <typename T, int group_size, int bits, bool has_global_scale = false>
@@ -1756,10 +2174,11 @@ template <typename T, int group_size, int bits, bool has_global_scale = false>
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {
   int M = x_shape[x_batch_ndims];
-  adjust_matrix_offsets(
+  adjust_matrix_offsets<has_global_scale>(
       x,
       w,
       scales,
+      global_scale,
       lhs_indices,
       rhs_indices,
       y,
@@ -1776,7 +2195,7 @@ template <typename T, int group_size, int bits, bool has_global_scale = false>
       w_strides,
       s_strides,
       tid);
-  fp_qmv_fast_impl<T, group_size, bits, has_global_scale>(
+  fp_qmv_fast_impl<T, group_size, bits, false, has_global_scale>(
       w,
       scales,
       global_scale,
@@ -1815,10 +2234,11 @@ template <typename T, int group_size, int bits, bool has_global_scale = false>
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {
   int M = x_shape[x_batch_ndims];
-  adjust_matrix_offsets(
+  adjust_matrix_offsets<has_global_scale>(
       x,
       w,
       scales,
+      global_scale,
       lhs_indices,
       rhs_indices,
       y,
@@ -1835,7 +2255,7 @@ template <typename T, int group_size, int bits, bool has_global_scale = false>
       w_strides,
       s_strides,
       tid);
-  fp_qmv_fast_impl<T, group_size, bits, has_global_scale, 4, true>(
+  fp_qmv_fast_impl<T, group_size, bits, false, has_global_scale, 4, true>(
       w,
       scales,
       global_scale,
@@ -1874,10 +2294,11 @@ template <typename T, int group_size, int bits, bool has_global_scale = false>
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {
   int M = x_shape[x_batch_ndims];
-  adjust_matrix_offsets(
+  adjust_matrix_offsets<has_global_scale>(
       x,
       w,
       scales,
+      global_scale,
       lhs_indices,
       rhs_indices,
       y,
@@ -1933,10 +2354,11 @@ template <typename T, int group_size, int bits, bool has_global_scale = false>
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {
   int M = x_shape[x_batch_ndims];
-  adjust_matrix_offsets(
+  adjust_matrix_offsets<has_global_scale>(
       x,
       w,
       scales,
+      global_scale,
       lhs_indices,
       rhs_indices,
       y,
@@ -1972,12 +2394,14 @@ template <
     const int group_size,
     const int bits,
     const bool aligned_N,
+    const bool has_global_scale = false,
     const int BM = 32,
     const int BK = 32,
     const int BN = 32>
 [[kernel]] void fp_gather_qmm_t(
     const device uint32_t* w,
     const device uint8_t* scales,
+    const device float* global_scale,
     const device T* x,
     const device uint32_t* lhs_indices,
     const device uint32_t* rhs_indices,
@@ -2007,10 +2431,11 @@ template <
   threadgroup T Xs[BM * BK_padded];
   threadgroup T Ws[BN * BK_padded];
 
-  adjust_matrix_offsets(
+  adjust_matrix_offsets<has_global_scale>(
       x,
       w,
       scales,
+      global_scale,
       lhs_indices,
       rhs_indices,
       y,
@@ -2027,8 +2452,31 @@ template <
       w_strides,
       s_strides,
       tid);
-  fp_qmm_t_impl<T, group_size, bits, aligned_N, BM, BK, BN>(
-      w, scales, x, y, Xs, Ws, K, N, M, K, tid, lid, simd_gid, simd_lid);
+  fp_qmm_t_impl<
+      T,
+      group_size,
+      bits,
+      aligned_N,
+      T,
+      has_global_scale,
+      BM,
+      BK,
+      BN>(
+      w,
+      scales,
+      global_scale,
+      x,
+      y,
+      Xs,
+      Ws,
+      K,
+      N,
+      M,
+      K,
+      tid,
+      lid,
+      simd_gid,
+      simd_lid);
 }
 
 template <
@@ -2043,7 +2491,7 @@ template <
     const device uint32_t* w [[buffer(0)]],
     const device uint8_t* scales [[buffer(1)]],
     const device T* x [[buffer(2)]],
-    device T* y [[buffer(3)]],
+    device float* y [[buffer(3)]],
     const constant int& K [[buffer(4)]],
     const constant int& N [[buffer(5)]],
     const constant int& M [[buffer(6)]],
@@ -2058,8 +2506,14 @@ template <
   constexpr int BK_padded = (BK + 16 / sizeof(T));
   constexpr int pack_factor = get_fp_pack_factor<8, bits>();
   constexpr int bytes_per_pack = get_bytes_per_pack();
+  using TW = metal::conditional_t<
+      use_fp4_half_loader<T, group_size, bits, /* has_global_scale */ false>(),
+      half,
+      T>;
+
   threadgroup T Xs[BM * BK_padded];
-  threadgroup T Ws[BN * BK_padded];
+  threadgroup TW Ws[BN * BK_padded];
+
   const int k_start = tid.z * k_partition_size;
   x += k_start;
 
@@ -2068,9 +2522,10 @@ template <
   scales += k_start / group_size;
   y += tid.z * static_cast<int64_t>(split_k_partition_stride);
 
-  fp_qmm_t_impl<T, group_size, bits, aligned_N, BM, BK, BN>(
+  fp_qmm_t_impl<T, group_size, bits, aligned_N, float, false, BM, BK, BN>(
       (const device uint32_t*)wl,
       scales,
+      nullptr,
       x,
       y,
       Xs,
@@ -2096,6 +2551,7 @@ template <
 [[kernel]] void fp_gather_qmm_n(
     const device uint32_t* w,
     const device uint8_t* scales,
+    const device float* global_scale,
     const device T* x,
     const device uint32_t* lhs_indices,
     const device uint32_t* rhs_indices,
@@ -2126,10 +2582,11 @@ template <
   threadgroup T Xs[BM * BK_padded];
   threadgroup T Ws[BK * BN_padded];
 
-  adjust_matrix_offsets(
+  adjust_matrix_offsets<has_global_scale>(
       x,
       w,
       scales,
+      global_scale,
       lhs_indices,
       rhs_indices,
       y,
@@ -2146,8 +2603,21 @@ template <
       w_strides,
       s_strides,
       tid);
-  fp_qmm_n_impl<T, group_size, bits, BM, BK, BN>(
-      w, scales, x, y, Xs, Ws, K, N, M, tid, lid, simd_gid, simd_lid);
+  fp_qmm_n_impl<T, group_size, bits, has_global_scale, BM, BK, BN>(
+      w,
+      scales,
+      global_scale,
+      x,
+      y,
+      Xs,
+      Ws,
+      K,
+      N,
+      M,
+      tid,
+      lid,
+      simd_gid,
+      simd_lid);
 }
 
 template <
@@ -2159,11 +2629,13 @@ template <
     int BK,
     int WM,
     int WN,
-    bool transpose>
+    bool transpose,
+    bool has_global_scale = false>
 [[kernel]] void fp_gather_qmm_rhs(
     const device T* x,
     const device uint32_t* w,
     const device uint8_t* scales,
+    const device float* global_scale,
     const device int32_t* offsets,
     device T* y,
     const constant int& M,
@@ -2200,7 +2672,8 @@ template <
       transpose,
       WM * WN * SIMD_SIZE,
       group_size,
-      bits>;
+      bits,
+      has_global_scale>;
 
   threadgroup T Xs[BM * BK_padded];
   threadgroup T Ws[transpose ? BN * BK_padded : BK * BN_padded];
@@ -2251,7 +2724,8 @@ template <
       transpose ? K : N,
       Ws,
       simd_group_id,
-      simd_lane_id);
+      simd_lane_id,
+      global_scale + group);
 
   // Tile aligned so check outside of the hot loop
   if (tgp_bm == BM && (align_N || tgp_bn == BN)) {

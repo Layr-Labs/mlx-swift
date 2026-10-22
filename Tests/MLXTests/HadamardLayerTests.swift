@@ -11,8 +11,9 @@ class HadamardLayerTests: XCTestCase {
         let width = 1024
         let signs = (0 ..< width).map { Float($0 % 3 == 0 ? -1 : 1) }
         let transform = try SignedBlockHadamard(blockSize: width, signs: signs)
-        let input = MLXArray((0 ..< width).map { Float(($0 * 13) % 127 - 63) / 7 })
-            .asType(.float16)
+        // A named [Float] keeps the MLXArray initializer overloads cheap to type-check.
+        let values: [Float] = (0 ..< width).map { Float(($0 * 13) % 127 - 63) / 7 }
+        let input = MLXArray(values).asType(.float16)
         let forward = hadamardTransform(input.asType(.float32) * MLXArray(signs))
             .asType(.float16)
         let inverse = (hadamardTransform(input.asType(.float32)) * MLXArray(signs))

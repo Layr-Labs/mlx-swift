@@ -643,8 +643,9 @@ class OpsCoverageTests: XCTestCase {
     func testTensordotOverloads() {
         let a = MLXArray(0 ..< 6, [2, 3]).asType(.float32)
         let b = MLXArray(0 ..< 6, [3, 2]).asType(.float32)
-        // axes: 1 is a matrix product
-        let r1 = tensordot(a, b)
+        // axes: 1 is a matrix product. The default is axes: 2, as in numpy
+        // and Python MLX (ml-explore/mlx-swift #477).
+        let r1 = tensordot(a, b, axes: 1)
         XCTAssertEqual(r1.shape, [2, 2])
         XCTAssertEqual(r1.asArray(Float.self), [10, 13, 28, 40])
 
@@ -652,6 +653,7 @@ class OpsCoverageTests: XCTestCase {
         let c = MLXArray(0 ..< 6, [2, 3]).asType(.float32)
         let r2 = tensordot(a, c, axes: 2)
         XCTAssertEqual(r2.item(Float.self), 55)
+        XCTAssertEqual(tensordot(a, c).item(Float.self), 55)
 
         let r3 = tensordot(a, c, axes: ((0, 1), (0, 1)))
         XCTAssertEqual(r3.item(Float.self), 55)

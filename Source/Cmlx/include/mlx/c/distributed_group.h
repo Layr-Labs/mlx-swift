@@ -110,6 +110,23 @@ int mlx_distributed_all_sum_sealed(
     const mlx_array x,
     const mlx_distributed_group group /* may be null */,
     const mlx_stream s);
+/**
+ * Two ranks, x shaped [1, T, ...]: rank r's half of the sealed sum (rows
+ * r * T / 2 ..< (r + 1) * T / 2, T even), added in rank order as
+ * mlx_distributed_all_sum_sealed adds; and the sealed all-gather of the
+ * ranks' [1, T, ...] rows into [1, 2T, ...], rank 0's first. Same codec and
+ * counters as the sealed all-sum, half its bytes each.
+ */
+int mlx_distributed_reduce_scatter_sealed(
+    mlx_array* res,
+    const mlx_array x,
+    const mlx_distributed_group group /* may be null */,
+    const mlx_stream s);
+int mlx_distributed_all_gather_sealed(
+    mlx_array* res,
+    const mlx_array x,
+    const mlx_distributed_group group /* may be null */,
+    const mlx_stream s);
 
 /**
  * Opt in to one bounded JACCL startup wait on this initialized group.

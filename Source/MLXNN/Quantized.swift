@@ -402,13 +402,16 @@ open class QuantizedLinear: Linear, Quantized {
         // The native affine operation already widens BF16 constants when x
         // is FP32. Reuse precisely that conversion, without changing its
         // promotion policy or touching MXFP4's packed U8 scales.
-        let scales = mode == .affine
-            ? (scaleCastCache.cachedCast(self.scales, to: x.dtype,
+        let scales =
+            mode == .affine
+            ? (scaleCastCache.cachedCast(
+                self.scales, to: x.dtype,
                 allowFloat16: allowFloat16) ?? self.scales)
             : self.scales
         let biases = self.biases.map { offsets in
             mode == .affine
-                ? (offsetCastCache.cachedCast(offsets, to: x.dtype,
+                ? (offsetCastCache.cachedCast(
+                    offsets, to: x.dtype,
                     allowFloat16: allowFloat16) ?? offsets)
                 : offsets
         }
@@ -417,8 +420,10 @@ open class QuantizedLinear: Linear, Quantized {
             groupSize: groupSize, bits: bits, mode: mode)
         output = applyNVFP4GlobalScale(output, globalScale: globalScale)
         if let bias {
-            let bias = linearBiasCastCache.cachedCast(bias, to: output.dtype,
-                allowFloat16: allowFloat16) ?? bias
+            let bias =
+                linearBiasCastCache.cachedCast(
+                    bias, to: output.dtype,
+                    allowFloat16: allowFloat16) ?? bias
             output = output + bias
         }
         return output

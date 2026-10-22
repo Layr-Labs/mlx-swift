@@ -25,11 +25,11 @@ arg_reduce.metal \
 conv.metal \
 dot.metal \
 gather_mm_offsets.metal \
-gemv.metal \
 layer_norm.metal \
 random.metal \
 rms_norm.metal \
 rope.metal \
+searchsorted.metal \
 scaled_dot_product_attention.metal \
 steel/attn/kernels/steel_attention.metal"
 

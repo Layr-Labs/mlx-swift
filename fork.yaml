@@ -49,10 +49,9 @@ def:
             `.gitmodules` points `Source/Cmlx/mlx` and `Source/Cmlx/mlx-c` at
             `Layr-Labs/mlx` / `Layr-Labs/mlx-c`; the gitlinks are advanced with each core change.
             The diff shown for the two submodule paths is the pointer change only.
-            The `mlx` pin includes the core compiler-capacity retry for 512- and
-            1024-thread Metal groups without changing kernel math or dispatch geometry.
-            The `mlx-c` pin is the merge of upstream `ml-explore/mlx-c` main into the
-            fork. It has the upstream C API that upstream mlx-swift calls and the fork's
+            Both pins are merges of upstream `main` into the forks (2026-10-22). The `mlx` pin
+            keeps the core compiler-capacity retry for 512- and 1024-thread Metal groups. The
+            `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
             own C API.
           globs:
             - ".gitmodules"
@@ -66,12 +65,15 @@ def:
             defines `main()`. `MLX_VERSION` is 0.32.2 to match the pinned core, in `Package.swift`
             and in the Xcode configuration. The `MLXTests` target depends on `MLXLinalg`, so a
             test can call the deprecated `MLXLinalg.triInv`. The Xcode project lists the
-            mirrored `gemma4_expert_qmm.h` header. Upstream builds JACCL, the ring backend and
+            mirrored `gemma4_expert_qmm.h` header. The non-CUDA builds also exclude
+            `cusolver_utils.cpp` and the Windows-only `wddm.cpp`, which the pinned core adds
+            under `backend/cuda`. Upstream builds JACCL, the ring backend and
             the distributed C API itself since its 2026-10 merges, so the fork no longer changes
             that wiring.
-            `tools/fix-metal-includes.sh` also copies `gather_mm_offsets.metal`, so the SwiftPM
-            `default.metallib` carries that kernel, which the core loads by name with no JIT
-            fallback. The script does not copy `fence.metal`: upstream builds `fence` only at
+            `tools/fix-metal-includes.sh` also copies `gather_mm_offsets.metal`,
+            `gated_delta_update.metal`, `gated_delta_update_vjp.metal` and
+            `scaled_dot_product_attention_vjp.metal`, so the SwiftPM `default.metallib` carries
+            those kernels. The pinned core loads them by name with no JIT fallback. The script does not copy `fence.metal`: upstream builds `fence` only at
             Metal 3.2 or newer, and this package targets macOS 14.0 (Metal 3.1). Thus the
             SwiftPM `default.metallib` has no `fence` kernels, and `MLX_METAL_FAST_SYNCH=1`
             needs a metallib built at Metal 3.2 or newer, such as the CMake full-AOT
@@ -223,6 +225,15 @@ def:
           globs:
             - "Source/MLX/MLXFastKernel.swift"
             - "Source/MLXFast/MLXFastKernel.swift"
+        - title: "Ops: gatherQuantizedMM global scale"
+          description: |
+            The pinned `mlx-c` adds a `global_scale` argument to `mlx_gather_qmm` (upstream
+            `mlx-c` 0.32.4). `gatherQuantizedMM` passes it through as an optional
+            `globalScale` parameter, which NVFP4 uses. The default is `nil`, so existing
+            callers do not change.
+          globs:
+            - "Source/MLX/Ops.swift"
+            - "Source/MLX/Documentation.docc/Organization/arithmetic.md"
         - title: "Ops: nanToNum defaults for float64 and complex64"
           description: |
             Upstream now gives `posInf` and `negInf` a default of `nil`, which gives the largest
@@ -277,7 +288,7 @@ def:
         `CustomFunctionTests`, `ConvolutionTransposedTests` and `CacheTests` cover custom
         functions with a custom VJP, the transposed convolution layers and the MLXNN cache, which
         had no tests.
-        `TransformerTests` and `RecurrentTests` cover the upstream Transformer, RNN, GRU and LSTM
+        `TransformerTests` and `RecurrentLayerTests` cover the upstream Transformer, RNN, GRU and LSTM
         layers, which had no tests, against references built from plain ops.
         `CompileOverloadsTests` covers the typed `compile` overloads, which had no tests: each
         compiled result must equal the uncompiled result, and a second call must not trace again.

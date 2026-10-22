@@ -106,6 +106,32 @@ jobs:
             exit 1
           fi
 
+      - name: Run the multi-process distributed tests
+        # Each ring class forms one group per process, so each class runs in its own xctest process.
+        # The harness starts the other ranks again from the same test bundle.
+        env:
+          MLX_TEST_DISTRIBUTED: "1"
+        run: |
+          set -o pipefail
+          bin=$(swift build --show-bin-path)
+          bundle="$bin/mlx-swiftPackageTests.xctest"
+          if [ ! -d "$bundle" ]; then
+            bundle="$bin/MLXTests.xctest"
+          fi
+          if [ ! -d "$bundle" ]; then
+            echo "::error::No test bundle under $bin."
+            exit 1
+          fi
+          for suite in DistributedRingTests DistributedNNRingTests; do
+            log="$RUNNER_TEMP/swift-$suite.log"
+            xcrun xctest -XCTest "$suite" "$bundle" 2>&1 | tee "$log"
+            if ! grep -Eq "^Test Suite '$suite' passed" "$log" ||
+               grep -Eq "^Test Case '.*' (failed|skipped) \(" "$log"; then
+              echo "::error::$suite must execute and pass without skips."
+              exit 1
+            fi
+          done
+
       - name: Run the tests
         env:
           # MLX reads this flag once, when it opens the Metal device. It turns on the sorted expert-tile route for the whole test run.
@@ -117,7 +143,8 @@ jobs:
           MLX_RESOURCE_LIMIT: "50000"
         run: |
           set -o pipefail
-          swift test --skip-build --enable-code-coverage --skip ProcessAllocationCapTests 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          swift test --skip-build --enable-code-coverage --skip ProcessAllocationCapTests \
+            --skip DistributedRingTests --skip DistributedNNRingTests 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
           # XCTest prints a summary line for each suite. The last line covers the whole run.
           summary=$(grep -E 'Executed [0-9]+ tests?, with' "$RUNNER_TEMP/swift-test.log" | tail -n 1 || true)
           echo "Test summary: $summary" >> "$GITHUB_STEP_SUMMARY"
@@ -125,7 +152,7 @@ jobs:
             echo "::error::The test run executed zero tests."
             exit 1
           fi
-          # The cap test ran in its own process. Only the opt-in perf test and
+          # The cap test and the ring tests ran in their own processes. Only the opt-in perf test and
           # the AOT-only retract test on NAX hardware may skip here.
           unexpected=$(grep -E "^Test Case '.*' skipped \(" "$RUNNER_TEMP/swift-test.log" | grep -Ev "^Test Case '-\[[^.]+\.(QwenExpertTilePerfTests testQwenRoutedPrefillUnitTimings|SortedGatherQuantizedMMTests testQwenSortednessViolationRetractsToLegacyRoute)\]' skipped \(" || true)
           if [ -n "$unexpected" ]; then

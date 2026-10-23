@@ -8,7 +8,6 @@ import XCTest
 class ConvolveSameModeTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     /// Full 1D convolution, as numpy.convolve(a, b, mode: "full") computes it.

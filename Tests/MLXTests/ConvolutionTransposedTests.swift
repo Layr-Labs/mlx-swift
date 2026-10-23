@@ -15,7 +15,6 @@ import XCTest
 class ConvolutionTransposedTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     private func assertClose(

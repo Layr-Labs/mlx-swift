@@ -681,10 +681,20 @@ constexpr complex_t<T> operator*(complex_t<T> a, complex_t<T> b) {
 
 template <typename T>
 constexpr complex_t<T> operator/(complex_t<T> a, complex_t<T> b) {
-  auto denom = b.real * b.real + b.imag * b.imag;
-  auto x = a.real * b.real + a.imag * b.imag;
-  auto y = a.imag * b.real - a.real * b.imag;
-  return {x / denom, y / denom};
+  float ar = a.real, ai = a.imag;
+  float br = b.real, bi = b.imag;
+  if (abs(br) >= abs(bi)) {
+    auto ratio = bi / br;
+    auto denom = br + bi * ratio;
+    return {
+        static_cast<T>((ar + ai * ratio) / denom),
+        static_cast<T>((ai - ar * ratio) / denom)};
+  }
+  auto ratio = br / bi;
+  auto denom = bi + br * ratio;
+  return {
+      static_cast<T>((ar * ratio + ai) / denom),
+      static_cast<T>((ai * ratio - ar) / denom)};
 }
 
 template <
@@ -692,11 +702,7 @@ template <
     typename U,
     enable_if_t<!is_complex_v<U> && is_lane_convertible_v<U, T>, bool> = true>
 constexpr complex_t<T> operator/(U a, complex_t<T> b) {
-  auto scalar = static_cast<T>(a);
-  auto denom = b.real * b.real + b.imag * b.imag;
-  auto x = scalar * b.real;
-  auto y = -scalar * b.imag;
-  return {x / denom, y / denom};
+  return complex_t<T>(a) / b;
 }
 
 template <typename T>
@@ -739,6 +745,7 @@ static MTL_CONST constexpr int REDUCE_N_WRITES = 4;
 static MTL_CONST constexpr int SOFTMAX_N_READS = 4;
 static MTL_CONST constexpr int RMS_N_READS = 4;
 static MTL_CONST constexpr int RMS_LOOPED_LIMIT = 4096;
+static MTL_CONST constexpr int CROSS_ENTROPY_N_READS = 4;
 
 // Instantiate a templated kernel.
 // Extra args are used as template parameters:
@@ -1131,6 +1138,29 @@ inline complex64_t log1p(complex64_t in) {
     auto z0 = metal::sqrt((x + 1) * (x + 1) + y * y);
     return {metal::log(z0), theta};
   }
+}
+
+// https://github.com/pytorch/pytorch/blob/a82aae9d4a7827849ce50f31c4c7ee8f278d05f5/c10/metal/utils.h#L554
+inline float hypot(float x, float y) {
+  if (metal::isinf(x) || metal::isinf(y)) {
+    return metal::numeric_limits<float>::infinity();
+  }
+  if (metal::isnan(x) || metal::isnan(y)) {
+    return metal::numeric_limits<float>::quiet_NaN();
+  }
+  float a = metal::fmax(metal::fabs(x), metal::fabs(y));
+  float b = metal::fmin(metal::fabs(x), metal::fabs(y));
+  if (a == 0.0f) {
+    return 0.0f;
+  }
+  float r = (b / a) * (b / a);
+  float sqrt_1_plus_r = metal::precise::sqrt(1.0f + r);
+  float h1 = metal::sqrt(2.0f) * a;
+  float h2 = a + a * r / 2.0f;
+  float h3 = a * sqrt_1_plus_r;
+  bool is_h1 = (a == b);
+  bool is_h2 = ((sqrt_1_plus_r == 1.0f) && (r > 0.0f));
+  return metal::select(metal::select(h3, h2, is_h2), h1, is_h1);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -13,7 +13,6 @@ import XCTest
 class LinalgCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     private func matrix(_ values: [Float], _ shape: [Int]) -> MLXArray {

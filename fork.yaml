@@ -151,11 +151,26 @@ def:
             `withSerializedEvaluation` runs a body under `evalLock`, so status-checking native
             evaluation and fences cannot commit the global Metal command buffer during a
             model evaluation. Upstream fixed the compiled-function lock order itself, so the
-            fork no longer changes `Transforms+Compile.swift`.
+            fork no longer changes the lock order in `Transforms+Compile.swift`.
           globs:
             - "Source/MLX/EvalProbe.swift"
             - "Source/MLX/Transforms+Eval.swift"
             - "Tests/MLXTests/NativeEvaluationSerializationTests.swift"
+        - title: "Compile: key each trace by the task's default stream"
+          description: |
+            MLX keys a cached compiled trace by the C++ thread default stream. mlx-swift
+            scopes the default device and stream to the task (`Device.withDefaultDevice`,
+            `Stream.withNewDefaultStream`) and does not change the C++ default. A trace that
+            a thread recorded in a CPU scope was therefore replayed when the same thread later
+            called the function in a GPU scope, and the GPU call ran on the CPU. The same
+            applied between two GPU streams. `CompiledFunction` now passes the task default
+            stream (device type, device index, stream index) as the `constants` of
+            `mlx_detail_compile`, so each stream gets its own trace. Every `compile` overload
+            and the compiled MLXNN activations go through `CompiledFunction`, so this one
+            change covers all of them. `CompileStreamKeyTests` covers it. The upstream code
+            has the same defect.
+          globs:
+            - "Source/MLX/Transforms+Compile.swift"
         - title: "GPU diagnostics: Gemma 4 expert-QMM route counters"
           description: |
             `GPU.Gemma4ExpertQMMDiagnostics` with snapshot / reset / arm / disarm wraps the fork's
@@ -293,6 +308,8 @@ def:
         layers, which had no tests, against references built from plain ops.
         `CompileOverloadsTests` covers the typed `compile` overloads, which had no tests: each
         compiled result must equal the uncompiled result, and a second call must not trace again.
+        `CompileStreamKeyTests` calls one compiled function first in a CPU scope and then on the
+        GPU from the same thread. The GPU call must equal GPU eager evaluation bitwise.
       globs:
         - "Tests/MLXTests/*.swift"
     - title: "Fork tooling"

@@ -139,7 +139,7 @@ jobs:
           du -sh .build/* "$rel"/* 2>/dev/null | sort -h | tail -n 20
           excludes=(--exclude ".build/repositories" --exclude "$rel/*.build" --exclude "$rel/ModuleCache" --exclude "$rel/index")
           while IFS= read -r exe; do
-            excludes+=(--exclude "$exe")
+            excludes+=(--exclude "$exe" --exclude "$exe.dSYM")
           done < <(find "$rel" -maxdepth 1 -type f -perm -u+x)
           mkdir -p "$RUNNER_TEMP/test-products"
           start=$(date +%s)

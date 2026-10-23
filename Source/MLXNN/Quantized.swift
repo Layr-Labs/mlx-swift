@@ -358,7 +358,9 @@ open class QuantizedLinear: Linear, Quantized {
     /// Shared arithmetic path; FP16 widening reuse is private and opt-in for
     /// an eligible packed-Hadamard caller. Ordinary quantized layers retain
     /// the established BF16-only cache contract.
-    func constantCachedForward(_ x: MLXArray, allowFloat16: Bool) -> MLXArray {
+    func constantCachedForward(
+        _ x: MLXArray, allowFloat16: Bool, independentRows: Bool = false
+    ) -> MLXArray {
         // The native affine operation already widens BF16 constants when x
         // is FP32. Reuse precisely that conversion, without changing its
         // promotion policy or touching MXFP4's packed U8 scales.
@@ -372,9 +374,24 @@ open class QuantizedLinear: Linear, Quantized {
                     allowFloat16: allowFloat16) ?? offsets)
                 : offsets
         }
-        var output = quantizedMM(
-            x, weight, scales: scales, biases: biases, transpose: true,
-            groupSize: groupSize, bits: bits, mode: mode)
+        let outputShape = Array(x.shape.dropLast()) + [weight.dim(0)]
+        // Only the signed-Hadamard FP32 contract opts into this branch.
+        // A leading weight dimension keeps every row at M=1, avoiding the
+        // architecture-dependent TF32 matrix path without unpacking weights.
+        // Ordinary quantized callers preserve their existing operator below.
+        var output: MLXArray
+        if independentRows {
+            precondition(x.dtype == .float32 && x.ndim >= 2 && mode == .affine)
+            output = quantizedMM(
+                x.reshaped([-1, 1, x.dim(-1)]), weight.expandedDimensions(axis: 0),
+                scales: scales.expandedDimensions(axis: 0),
+                biases: biases?.expandedDimensions(axis: 0), transpose: true,
+                groupSize: groupSize, bits: bits, mode: mode).reshaped(outputShape)
+        } else {
+            output = quantizedMM(
+                x, weight, scales: scales, biases: biases, transpose: true,
+                groupSize: groupSize, bits: bits, mode: mode)
+        }
         if let bias {
             let bias = linearBiasCastCache.cachedCast(bias, to: output.dtype,
                 allowFloat16: allowFloat16) ?? bias

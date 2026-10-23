@@ -88,9 +88,19 @@ final class Float16ConstantCastTests: XCTestCase {
     }
 
     private func reference(_ layer: HadamardQuantizedLinear, _ x: MLXArray) -> MLXArray {
-        var output = quantizedMM(layer.transform(layer.gdnLayout.map { $0(x) } ?? x),
-            layer.weight, scales: layer.scales, biases: layer.biases,
-            groupSize: layer.groupSize, bits: layer.bits)
+        let transformed = layer.transform(layer.gdnLayout.map { $0(x) } ?? x)
+        let eligible = x.dtype == .float32 && x.ndim >= 2 && x.size / layer.transform.width > 1
+            && layer.bits == 2 && layer.groupSize == 128 && layer.transform.blockSize == 1024
+            && layer.scales.dtype == .float16
+        // Cache reuse must preserve the selected arithmetic contract. Bonsai
+        // FP32 multi-row calls now have the original singleton packed oracle.
+        let flat = transformed.reshaped([-1, layer.transform.width])
+        var output = eligible ? concatenated((0..<flat.dim(0)).map { row in
+            quantizedMM(flat[row..<(row + 1)], layer.weight, scales: layer.scales,
+                biases: layer.biases, groupSize: layer.groupSize, bits: layer.bits)
+        }, axis: 0).reshaped(Array(x.shape.dropLast()) + [layer.weight.dim(0)])
+            : quantizedMM(transformed, layer.weight, scales: layer.scales, biases: layer.biases,
+                groupSize: layer.groupSize, bits: layer.bits)
         if let bias = layer.bias { output = output + bias }
         return output
     }
@@ -117,7 +127,7 @@ final class Float16ConstantCastTests: XCTestCase {
             }
         }
         XCTAssertEqual(layer.parameters().flattened().map(\.0).sorted(), names)
-        let input = MLXArray.ones([1, 1024], dtype: .float32)
+        let input = MLXArray.ones([3, 1024], dtype: .float32)
         Parent(layer).update(parameters: ModuleParameters.unflattened([
             ("child.scales", (layer.scales * 2).asType(.float16)),
             ("child.bias", (layer.bias! + 1).asType(.float16)),
@@ -135,7 +145,7 @@ final class Float16ConstantCastTests: XCTestCase {
 
     func testPackedCompileStateReplacementAndIneligibleShapes() throws {
         let layer = try layer()
-        let input = MLXArray.ones([1, 1024], dtype: .float32)
+        let input = MLXArray.ones([3, 1024], dtype: .float32)
         eval(layer(input))
         let compiled = compile(inputs: [layer]) { (x: MLXArray) in layer(x) }
         for multiplier in [Float(1), 2] {

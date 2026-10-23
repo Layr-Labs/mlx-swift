@@ -51,7 +51,8 @@ def:
             The diff shown for the two submodule paths is the pointer change only.
             The current pair includes the core compiler-capacity retry for 512- and
             1024-thread Metal groups without changing kernel math or dispatch geometry,
-            orders the fast-synch GPU wait after every pending pass on its queue, carries
+            orders the fast-synch GPU wait after every pending pass and earlier kernels
+            in its current concurrent pass, carries
             1 MiB JACCL frames, batches buffer retention, caches custom-kernel sources and
             streams the sealed all-sum per AES-256-GCM piece over a two-rank JACCL exchange
             (`mlx_distributed_set_streamed_seal_codec` in the vendored C header), offers

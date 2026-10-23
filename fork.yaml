@@ -301,6 +301,8 @@ def:
         is not the merge-base with upstream, or when a file the fork changes is not described
         by a section above. `build-metallib.sh` builds the full MLX Metal library for the
         fork's test run in CI, because a SwiftPM command-line build compiles no Metal kernels.
+        Its `build` and `install` modes let CI build the library in its own job, cache it by
+        the `mlx` pin, and copy it into the test bundles of each test shard.
         `check-generated-metal-sources.py` checks copied Metal headers and complete declared
         JIT sections against current nested core, with exact wrappers and source-hash receipts.
         Its default gate covers affine and FP quantized kernels, including NAX. `--all` audits the broader

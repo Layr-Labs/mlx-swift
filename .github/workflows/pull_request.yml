@@ -19,18 +19,10 @@ jobs:
           fetch-depth: 2
 
       - name: Select the newest release of Xcode 26
-        run: |
-          ls -ld /Applications/Xcode*
-          # Beta and release candidate app names contain letters, so this pattern skips them.
-          # A new Xcode major version on the image does not change CI until a PR changes this pattern.
-          app=$(printf '%s\n' /Applications/Xcode_26.*.app | grep -E '^/Applications/Xcode_26(\.[0-9]+)+\.app$' | sort -V | tail -n 1 || true)
-          if [ -z "$app" ]; then
-            echo "::error::This runner has no release of Xcode 26."
-            exit 1
-          fi
-          sudo xcode-select -s "$app"
-          xcodebuild -version
-          swift format --version
+        uses: ./.github/actions/select-xcode
+
+      - name: Show the swift-format version
+        run: swift format --version
 
       - name: Check the format of the Swift files that this pull request changes
         # Main does not pass this check yet, so check only the changed files.

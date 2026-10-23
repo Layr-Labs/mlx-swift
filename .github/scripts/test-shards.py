@@ -4,9 +4,9 @@
 plan:   Reads the XCTest and Swift Testing lists from `swift test list` and
         the measured durations in test-shards.json. Writes one plan per shard.
         Fails when a listed test is in no shard or in more than one shard.
-verify: Reads the plans and the logs of all shards. Fails when a listed test
-        did not run, ran two or more times, failed, or skipped without
-        permission.
+verify: Reads the plans and the logs of all shards. Fails when the shards
+        made different plans, or when a listed test did not run, ran two or
+        more times, failed, or skipped without permission.
 
 Units of work:
 - Each XCTest class is one unit.
@@ -191,7 +191,8 @@ def plan(args):
     text = "\n".join(lines) + "\n"
     print(text)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
+    # Every shard makes the same plan. Only one shard writes it to the job summary.
+    if summary and args.summary_shard in (None, 1):
         with open(summary, "a") as handle:
             handle.write(text)
 
@@ -212,16 +213,29 @@ def verify(args):
     with open(args.config) as handle:
         config = json.load(handle)
     isolated_classes = set(config["isolated"]["classes"])
-    xctests = read_list(os.path.join(args.plan, "xctest-tests.txt"), XCTEST_ID)
-    swift_tests = read_list(os.path.join(args.plan, "swift-testing-tests.txt"))
     count = int(config["shards"])
+    # Each shard uploads its plan under plan/. The plan of shard 1 is the reference.
+    reference = os.path.join(args.results, "test-results-1", "plan")
+    xctests = read_list(os.path.join(reference, "xctest-tests.txt"), XCTEST_ID)
+    swift_tests = read_list(os.path.join(reference, "swift-testing-tests.txt"))
     errors = []
+    names = ["xctest-tests.txt", "swift-testing-tests.txt"] + [f"shard-{index}.json" for index in range(1, count + 1)]
+    for index in range(2, count + 1):
+        folder = os.path.join(args.results, f"test-results-{index}", "plan")
+        for name in names:
+            mine = os.path.join(folder, name)
+            if not os.path.exists(mine):
+                errors.append(f"Shard {index} has no plan file {name}.")
+                continue
+            with open(mine) as left, open(os.path.join(reference, name)) as right:
+                if left.read() != right.read():
+                    errors.append(f"Shard {index} made a different {name} than shard 1.")
 
     runs = {test: [] for test in xctests}
     ring_runs = {}
     swift_logs = []
     for index in range(1, count + 1):
-        with open(os.path.join(args.plan, f"shard-{index}.json")) as handle:
+        with open(os.path.join(reference, f"shard-{index}.json")) as handle:
             shard = json.load(handle)
         folder = os.path.join(args.results, f"test-results-{index}")
         if not os.path.isdir(folder):
@@ -320,9 +334,9 @@ def main():
     plan_parser.add_argument("--xctest", required=True)
     plan_parser.add_argument("--swift-testing", required=True)
     plan_parser.add_argument("--out", required=True)
+    plan_parser.add_argument("--summary-shard", type=int)
     verify_parser = commands.add_parser("verify")
     verify_parser.add_argument("--config", required=True)
-    verify_parser.add_argument("--plan", required=True)
     verify_parser.add_argument("--results", required=True)
     args = parser.parse_args()
     if args.command == "plan":

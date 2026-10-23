@@ -3,9 +3,9 @@ name: Fork Tests
 # Build the fork and run its tests on GitHub-hosted macOS runners.
 #
 # The jobs:
-#   build          Builds the package and its tests one time. Lists the tests and plans the shards.
+#   build          Builds the package and its tests one time.
 #   metallib       Builds the full Metal library, or restores it from the cache. It runs at the same time as build.
-#   test           One job for each shard. Each shard runs its part of the tests from the build products.
+#   test           One job for each shard. Each shard lists the tests, plans the shards and runs its part of the tests.
 #   build-and-test Checks that every listed test ran exactly once, and reports line coverage.
 #
 # .github/scripts/test-shards.json has the measured test durations and the shard count.
@@ -124,18 +124,9 @@ jobs:
             ${{ runner.temp }}/ccache
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
-      - name: List the tests and plan the shards
-        # The guard: the plan step fails if a listed test is in no shard or in two shards.
+      - name: Read the shard count
         id: plan
         run: |
-          set -o pipefail
-          plan="$RUNNER_TEMP/test-plan"
-          mkdir -p "$plan"
-          swift test list --skip-build --disable-swift-testing > "$RUNNER_TEMP/xctest-list.txt"
-          swift test list --skip-build --disable-xctest > "$RUNNER_TEMP/swift-testing-list.txt"
-          echo "XCTest: $(wc -l < "$RUNNER_TEMP/xctest-list.txt") lines. Swift Testing: $(wc -l < "$RUNNER_TEMP/swift-testing-list.txt") lines."
-          python3 .github/scripts/test-shards.py plan --config .github/scripts/test-shards.json \
-            --xctest "$RUNNER_TEMP/xctest-list.txt" --swift-testing "$RUNNER_TEMP/swift-testing-list.txt" --out "$plan"
           echo "shards=$(python3 -c 'import json; print(json.dumps(list(range(1, json.load(open(".github/scripts/test-shards.json"))["shards"] + 1))))')" >> "$GITHUB_OUTPUT"
 
       - name: Pack the test products
@@ -165,14 +156,6 @@ jobs:
           path: ${{ runner.temp }}/test-products/test-products.tar
           compression-level: 1
           retention-days: 1
-          overwrite: true
-
-      - name: Upload the test plan
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: test-plan
-          path: ${{ runner.temp }}/test-plan
-          retention-days: 7
           overwrite: true
 
   metallib:
@@ -263,24 +246,33 @@ jobs:
           name: metallib
           path: ${{ runner.temp }}/metallib
 
-      - name: Download the test plan
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: test-plan
-          path: ${{ runner.temp }}/test-plan
-
-      - name: Unpack the test products and read the shard plan
-        id: plan
-        env:
-          SHARD: ${{ matrix.shard }}
+      - name: Unpack the test products
         run: |
           start=$(date +%s)
           tar -xf "$RUNNER_TEMP/test-products/test-products.tar"
           echo "tar took $(( $(date +%s) - start )) s."
           scripts/build-metallib.sh install "$RUNNER_TEMP/metallib/mlx.metallib"
           echo "RESULTS=$RUNNER_TEMP/test-results" >> "$GITHUB_ENV"
-          mkdir -p "$RUNNER_TEMP/test-results"
-          plan="$RUNNER_TEMP/test-plan/shard-$SHARD.json"
+          echo "PLAN=$RUNNER_TEMP/test-results/plan" >> "$GITHUB_ENV"
+
+      - name: List the tests and plan the shards
+        # Each shard lists the tests and makes the same plan, because the plan depends only on the list and test-shards.json.
+        # The guard: this step fails if a listed test is in no shard or in two shards.
+        # The final job checks that all shards made the same plan.
+        id: plan
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -o pipefail
+          mkdir -p "$PLAN"
+          # Listing loads the test bundle, so it needs the Metal library in the bundle.
+          swift test list --skip-build --disable-swift-testing > "$RUNNER_TEMP/xctest-list.txt"
+          swift test list --skip-build --disable-xctest > "$RUNNER_TEMP/swift-testing-list.txt"
+          echo "XCTest: $(wc -l < "$RUNNER_TEMP/xctest-list.txt") lines. Swift Testing: $(wc -l < "$RUNNER_TEMP/swift-testing-list.txt") lines."
+          python3 .github/scripts/test-shards.py plan --config .github/scripts/test-shards.json \
+            --xctest "$RUNNER_TEMP/xctest-list.txt" --swift-testing "$RUNNER_TEMP/swift-testing-list.txt" --out "$PLAN" \
+            --summary-shard "$SHARD"
+          plan="$PLAN/shard-$SHARD.json"
           cat "$plan"
           python3 - "$plan" >> "$GITHUB_OUTPUT" <<'EOF'
           import json, sys
@@ -345,7 +337,7 @@ jobs:
         run: |
           set -o pipefail
           log="$RESULTS/xctest.log"
-          filter=$(cat "$RUNNER_TEMP/test-plan/shard-$SHARD.regex")
+          filter=$(cat "$PLAN/shard-$SHARD.regex")
           swift test --skip-build --enable-code-coverage --disable-swift-testing --filter "$filter" 2>&1 | tee "$log"
           cp "$BIN/codecov/default.profdata" "$RESULTS/xctest.profdata"
           # XCTest prints a summary line for each suite. The last line covers the whole run.
@@ -413,12 +405,6 @@ jobs:
       - name: Select the newest release of Xcode 26
         uses: ./.github/actions/select-xcode
 
-      - name: Download the test plan
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: test-plan
-          path: ${{ runner.temp }}/test-plan
-
       - name: Download the shard results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -428,7 +414,7 @@ jobs:
       - name: Check that every test ran exactly once
         run: |
           python3 .github/scripts/test-shards.py verify --config .github/scripts/test-shards.json \
-            --plan "$RUNNER_TEMP/test-plan" --results "$RUNNER_TEMP/test-results"
+            --results "$RUNNER_TEMP/test-results"
 
       - name: Download the test products
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0

@@ -11,7 +11,6 @@ import XCTest
 class CustomFunctionTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     private func assertClose(
@@ -67,8 +66,8 @@ class CustomFunctionTests: XCTestCase {
 
     /// The VJP block gets the inputs as primals and the given cotangents.
     func testVJPBlockReceivesPrimalsAndCotangents() {
-        var seenPrimals = [MLXArray]()
-        var seenCotangents = [MLXArray]()
+        nonisolated(unsafe) var seenPrimals = [MLXArray]()
+        nonisolated(unsafe) var seenCotangents = [MLXArray]()
         let f = CustomFunction {
             Forward { inputs in [inputs[0] * 2] }
             VJP { primals, cotangents in
@@ -91,7 +90,7 @@ class CustomFunctionTests: XCTestCase {
     /// Two inputs and two outputs: [a * b, a + b].
     /// The custom VJP must match the VJP of the same function in plain ops.
     func testTwoInputsTwoOutputs() {
-        let plain: ([MLXArray]) -> [MLXArray] = { xs in [xs[0] * xs[1], xs[0] + xs[1]] }
+        let plain: @Sendable ([MLXArray]) -> [MLXArray] = { xs in [xs[0] * xs[1], xs[0] + xs[1]] }
         let f = CustomFunction {
             Forward(plain)
             VJP { p, c in [c[0] * p[1] + c[1], c[0] * p[0] + c[1]] }

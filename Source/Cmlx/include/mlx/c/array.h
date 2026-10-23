@@ -388,7 +388,9 @@ const bfloat16_t* mlx_array_data_bfloat16(const mlx_array arr);
 int _mlx_array_is_available(bool* res, const mlx_array arr);
 
 /** Non-blocking backing metadata. Unavailable arrays return available=false.
- *  Views may report shared backing; these fields do not confer ownership. */
+ *  Views may report shared backing; these fields do not confer ownership.
+ *  `unique` is true when no other array references the array or its data,
+ *  also for a wrapped external buffer that MLX does not own. */
 int mlx_array_get_buffer_info(
     bool* available, size_t* allocated_bytes, size_t* data_offset,
     size_t* data_elements, bool* row_contiguous, bool* unique,

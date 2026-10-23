@@ -28,6 +28,23 @@ extern "C" {
  */
 /**@{*/
 
+/* Process-local, install-once Metal backing cap. Not a host/driver memory cap.
+ * Released buffers remain charged until their deallocator releases owned pages.
+ * Foreign wrappers never transfer ownership of caller pages. */
+typedef struct mlx_process_allocation_cap_snapshot {
+  bool installed;
+  size_t limit_bytes;
+  size_t heap_bytes;
+  size_t live_bytes;
+  size_t cached_bytes;
+  size_t pending_bytes;
+  size_t unreclaimed_bytes;
+  size_t charged_bytes;
+  size_t peak_bytes;
+} mlx_process_allocation_cap_snapshot;
+int mlx_install_process_allocation_cap(size_t bytes);
+int mlx_get_process_allocation_cap_snapshot(mlx_process_allocation_cap_snapshot* res);
+
 int mlx_clear_cache(void);
 int mlx_get_active_memory(size_t* res);
 int mlx_get_allocation_size_upper_bound(size_t* res, size_t size);
@@ -48,6 +65,7 @@ int mlx_allocation_footprint_policy_bound(size_t* res,
 int mlx_allocation_footprint_policy_maximum_extra(size_t* res,
     const mlx_allocation_footprint_policy* policy);
 
+int mlx_get_array_buffer_size(size_t* res, const mlx_vector_array arrays);
 int mlx_get_cache_memory(size_t* res);
 int mlx_get_memory_limit(size_t* res);
 int mlx_get_memory_snapshot(size_t* active, size_t* cache, size_t* peak);

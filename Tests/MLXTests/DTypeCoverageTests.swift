@@ -11,7 +11,6 @@ import XCTest
 class DTypeCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - DType properties

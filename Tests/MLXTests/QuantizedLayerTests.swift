@@ -40,7 +40,6 @@ private class QuantizeTestModel: Module {
 class QuantizedLayerTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - Helpers

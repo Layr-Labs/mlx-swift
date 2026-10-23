@@ -31,7 +31,6 @@ private func softmaxRef(_ v: [Float]) -> [Float] {
 class ActivationCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - Helpers

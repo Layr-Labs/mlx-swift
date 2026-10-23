@@ -9,7 +9,6 @@ import XCTest
 class FactoryCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - zeros and ones
@@ -175,9 +174,16 @@ class FactoryCoverageTests: XCTestCase {
     // MARK: - linspace
 
     func testLinspace() {
+        // Integer bounds give float32 by default, as Python mx.linspace does
+        // (ml-explore/mlx-swift #477). `dtype:` selects an integer result.
         let a = MLXArray.linspace(Int32(0), Int32(10), count: 6)
-        XCTAssertEqual(a.dtype, .int32)
-        XCTAssertEqual(a.asArray(Int32.self), [0, 2, 4, 6, 8, 10])
+        XCTAssertEqual(a.dtype, .float32)
+        XCTAssertEqual(a.asArray(Float.self), [0, 2, 4, 6, 8, 10])
+        let aInt = MLXArray.linspace(Int32(0), Int32(10), count: 6, dtype: .int32)
+        XCTAssertEqual(aInt.dtype, .int32)
+        XCTAssertEqual(aInt.asArray(Int32.self), [0, 2, 4, 6, 8, 10])
+        let half = MLXArray.linspace(Int32(0), Int32(1), count: 3)
+        XCTAssertEqual(half.asArray(Float.self), [0, 0.5, 1])
 
         let b = MLXArray.linspace(Float(0), Float(1), count: 5)
         XCTAssertEqual(b.dtype, .float32)
@@ -191,8 +197,11 @@ class FactoryCoverageTests: XCTestCase {
 
         // free functions
         let d = MLX.linspace(Int16(-4), Int16(4), count: 3)
-        XCTAssertEqual(d.dtype, .int16)
-        XCTAssertEqual(d.asArray(Int16.self), [-4, 0, 4])
+        XCTAssertEqual(d.dtype, .float32)
+        XCTAssertEqual(d.asArray(Float.self), [-4, 0, 4])
+        let dInt = MLX.linspace(Int16(-4), Int16(4), count: 3, dtype: .int16)
+        XCTAssertEqual(dInt.dtype, .int16)
+        XCTAssertEqual(dInt.asArray(Int16.self), [-4, 0, 4])
 
         let e = MLX.linspace(Float(1), Float(2), count: 3)
         assertEqual(e, MLXArray([Float(1), Float(1.5), Float(2)]))

@@ -8,7 +8,6 @@ import XCTest
 class MedianAllAxesTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     /// With no axes, the median is over the full array, as Python `mx.median(a)` does.

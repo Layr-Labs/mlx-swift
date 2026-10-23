@@ -48,7 +48,8 @@ public struct SignedBlockHadamard {
     /// Recover the original basis after looking up folded embedding rows.
     public func inverse(_ x: MLXArray) -> MLXArray {
         validate(x)
-        return (hadamardTransform(x.asType(.float32).reshaped([-1, blockSize])).reshaped(x.shape)
+        return
+            (hadamardTransform(x.asType(.float32).reshaped([-1, blockSize])).reshaped(x.shape)
             * signs).asType(x.dtype)
     }
 
@@ -232,7 +233,8 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
             rotated.size / transform.width > 1, bits == 2, groupSize == 128,
             transform.blockSize == 1024, scales.dtype == .float16
         {
-            return constantCachedForward(rotated, allowFloat16: permitsFloat16ConstantReuse,
+            return constantCachedForward(
+                rotated, allowFloat16: permitsFloat16ConstantReuse,
                 independentRows: true)
         }
         if permitsFloat16ConstantReuse && rotated.dtype == .float32 {

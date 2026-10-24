@@ -13,7 +13,6 @@ import XCTest
 class TransformerDecoderLayerTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     private func assertClose(

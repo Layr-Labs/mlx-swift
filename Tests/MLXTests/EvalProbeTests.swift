@@ -10,7 +10,6 @@ import XCTest
 class EvalProbeTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     /// Fix 1: a lazy realization via `asArray()` blocks in `MLXArray.eval()`
@@ -44,14 +43,14 @@ class EvalProbeTests: XCTestCase {
         let readsDone = expectation(description: "reads done")
 
         DispatchQueue.global().async {
-            for _ in 0..<200 {
+            for _ in 0 ..< 200 {
                 let a = MLXArray([1, 2, 3, 4]) * MLXArray([2, 2, 2, 2])
                 _ = a.asArray(Int32.self)
             }
             evalsDone.fulfill()
         }
         DispatchQueue.global().async {
-            for _ in 0..<10000 {
+            for _ in 0 ..< 10000 {
                 _ = EvalProbe.currentEvalElapsedMs
                 _ = EvalProbe.inFlight
                 _ = EvalProbe.evalsCompleted

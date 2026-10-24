@@ -16,7 +16,6 @@ import XCTest
 class RandomCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     private let sampleCount = 4000

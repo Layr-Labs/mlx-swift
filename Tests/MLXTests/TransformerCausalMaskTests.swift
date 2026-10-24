@@ -10,7 +10,6 @@ import XCTest
 class TransformerCausalMaskTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     /// A float16 mask must still be 0 where a position may attend.

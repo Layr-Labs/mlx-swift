@@ -10,7 +10,6 @@ import XCTest
 class LossCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - Helpers
@@ -275,10 +274,12 @@ class LossCoverageTests: XCTestCase {
         _ a: [[Float]], _ p: [[Float]], _ n: [[Float]], power: Float, margin: Float,
         eps: Float
     ) -> [Float] {
+        // The p-norm distance (sum |x|^p + eps)^(1/p), as Python
+        // nn.losses.triplet_loss computes it (ml-explore/mlx-swift #505).
         (0 ..< a.count).map { i in
-            let dp = zip(a[i], p[i]).map { pow($0 - $1, power) }.reduce(0, +)
-            let dn = zip(a[i], n[i]).map { pow($0 - $1, power) }.reduce(0, +)
-            return Swift.max((dp + eps).squareRoot() - (dn + eps).squareRoot() + margin, 0)
+            let dp = zip(a[i], p[i]).map { pow(abs($0 - $1), power) }.reduce(0, +)
+            let dn = zip(a[i], n[i]).map { pow(abs($0 - $1), power) }.reduce(0, +)
+            return Swift.max(pow(dp + eps, 1 / power) - pow(dn + eps, 1 / power) + margin, 0)
         }
     }
 

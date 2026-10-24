@@ -1,6 +1,14 @@
 name: Fork Tests
 
-# Build the fork and run its tests on a GitHub-hosted macOS runner.
+# Build the fork and run its tests on GitHub-hosted macOS runners.
+#
+# The jobs:
+#   build          Builds the package and its tests one time.
+#   metallib       Builds the full Metal library, or restores it from the cache. It runs at the same time as build.
+#   test           One job for each shard. Each shard lists the tests, plans the shards and runs its part of the tests.
+#   build-and-test Checks that every listed test ran exactly once, and reports line coverage.
+#
+# .github/scripts/test-shards.json has the measured test durations and the shard count.
 
 on:
   pull_request:
@@ -14,18 +22,25 @@ concurrency:
   # On main, a new run does not stop a run that has started. It can replace a run that still waits in the queue.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
+env:
+  # FP32 reference tests require full products on TF32-capable GPUs.
+  MLX_ENABLE_TF32: "0"
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  build-and-test:
+  build:
+    name: Build the package and its tests
     runs-on: macos-26
-    env:
-      # FP32 reference tests require full products on TF32-capable GPUs.
-      MLX_ENABLE_TF32: "0"
-    timeout-minutes: 150
-    permissions:
-      contents: read
-    defaults:
-      run:
-        shell: bash
+    timeout-minutes: 60
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      bin: ${{ steps.pack.outputs.bin }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -38,76 +53,280 @@ jobs:
 
       - name: Select the newest release of Xcode 26
         id: xcode
-        run: |
-          ls -ld /Applications/Xcode*
-          # Beta and release candidate app names contain letters, so this pattern skips them.
-          # A new Xcode major version on the image does not change CI until a PR changes this pattern.
-          app=$(printf '%s\n' /Applications/Xcode_26.*.app | grep -E '^/Applications/Xcode_26(\.[0-9]+)+\.app$' | sort -V | tail -n 1 || true)
-          if [ -z "$app" ]; then
-            echo "::error::This runner has no release of Xcode 26."
-            exit 1
-          fi
-          sudo xcode-select -s "$app"
-          sw_vers
-          xcodebuild -version
-          swift --version
-          version=$(swift --version 2>/dev/null | sed -n 's/.*Swift version \([0-9][0-9.]*\).*/\1/p' | head -n 1)
-          if [ "$(printf '%s\n' 6.3 "$version" | sort -V | head -n 1)" != 6.3 ]; then
-            echo "::error::$app has Swift $version. The package needs Swift 6.3 or newer."
-            exit 1
-          fi
-          echo "version=$(xcodebuild -version | awk 'NR == 1 { v = $2 } NR == 2 { b = $3 } END { print v "-" b }')" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/select-xcode
 
-      - name: Restore the SwiftPM cache
+      - name: Install ccache and read the submodule pins
+        id: pins
+        # SwiftPM compiles the Cmlx C and C++ core with the compiler in CC. A wrapper sends each compile through ccache.
+        run: |
+          if ! command -v ccache > /dev/null; then
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install ccache
+          fi
+          ccache --version | head -n 1
+          mkdir -p "$RUNNER_TEMP/ccache-bin"
+          printf '#!/bin/sh\nexec ccache %s "$@"\n' "$(xcrun -f clang)" > "$RUNNER_TEMP/ccache-bin/clang"
+          chmod +x "$RUNNER_TEMP/ccache-bin/clang"
+          cat "$RUNNER_TEMP/ccache-bin/clang"
+          echo "mlx=$(git rev-parse HEAD:Source/Cmlx/mlx)" >> "$GITHUB_OUTPUT"
+          echo "mlxc=$(git rev-parse HEAD:Source/Cmlx/mlx-c)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the build cache
+        # The key has the Xcode version, the two submodule pins and a hash of Package.swift and Source.
+        # On a miss, the newest cache with the same Xcode version and pins is restored, then the newest with the same Xcode version.
+        # ccache finds each object by a hash of its compile, so an older cache gives correct objects for the files that did not change.
         id: cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/Library/org.swift.swiftpm
-            .build
-          key: ${{ runner.os }}-swiftpm-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+            ${{ runner.temp }}/ccache
+          key: ${{ runner.os }}-build-xcode-${{ steps.xcode.outputs.version }}-mlx-${{ steps.pins.outputs.mlx }}-mlxc-${{ steps.pins.outputs.mlxc }}-${{ hashFiles('Package.swift', 'Source/**', '!Source/Cmlx/mlx/**', '!Source/Cmlx/mlx-c/**') }}
+          restore-keys: |
+            ${{ runner.os }}-build-xcode-${{ steps.xcode.outputs.version }}-mlx-${{ steps.pins.outputs.mlx }}-mlxc-${{ steps.pins.outputs.mlxc }}-
+            ${{ runner.os }}-build-xcode-${{ steps.xcode.outputs.version }}-
 
       - name: Build the package and its tests
         env:
           CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.cache.outputs.cache-matched-key }}
+          CC: ${{ runner.temp }}/ccache-bin/clang
+          CCACHE_DIR: ${{ runner.temp }}/ccache
+          CCACHE_COMPILERCHECK: content
+          CCACHE_SLOPPINESS: modules,include_file_mtime,include_file_ctime,time_macros,pch_defines,clang_index_store
+          CCACHE_MAXSIZE: 2G
         run: |
+          ccache --zero-stats > /dev/null
           start=$(date +%s)
-          swift build --build-tests --enable-code-coverage
+          swift build --build-tests --enable-code-coverage --disable-index-store
           seconds=$(( $(date +%s) - start ))
+          ccache --show-stats --verbose
+          # Keep only the objects that this build used, so the cache does not grow.
+          ccache --evict-older-than "$(( $(date +%s) - start + 60 ))s"
+          ccache --show-stats | grep -Ei 'hits|misses|cache size' || true
+          hits=$(ccache --print-stats | awk '$1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { n += $2 } END { print n + 0 }')
+          misses=$(ccache --print-stats | awk '$1 == "cache_miss" { print $2 }')
           echo "swift build --build-tests --enable-code-coverage took $(( seconds / 60 )) min $(( seconds % 60 )) s."
-          echo "Build wall time: $(( seconds / 60 )) min $(( seconds % 60 )) s. Cache hit: ${CACHE_HIT:-false}." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "Build wall time: $(( seconds / 60 )) min $(( seconds % 60 )) s."
+            echo "Build cache: exact hit ${CACHE_HIT:-false}, restored key \`${CACHE_KEY:-none}\`."
+            echo "ccache: $hits hits, ${misses:-0} misses, $(du -sh "$CCACHE_DIR" | cut -f1) on disk."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Save the SwiftPM cache
-        # Save on pushes to main only. Pull requests read the cache from main.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+      - name: Save the build cache
+        # Save on main and on the pull request. A pull request can read the caches of main and of its own branch.
+        if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/Library/org.swift.swiftpm
-            .build
+            ${{ runner.temp }}/ccache
           key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Read the shard count
+        id: plan
+        run: |
+          echo "shards=$(python3 -c 'import json; print(json.dumps(list(range(1, json.load(open(".github/scripts/test-shards.json"))["shards"] + 1))))')" >> "$GITHUB_OUTPUT"
+
+      - name: Pack the test products
+        # The tests need the test bundle, the package state and the dependency checkouts. The object files and executables stay behind.
+        id: pack
+        run: |
+          bin=$(swift build --show-bin-path)
+          rel=${bin#"$GITHUB_WORKSPACE/"}
+          echo "bin=$rel" >> "$GITHUB_OUTPUT"
+          du -sh .build/* "$rel"/* 2>/dev/null | sort -h | tail -n 20
+          excludes=(--exclude ".build/repositories" --exclude "$rel/*.build" --exclude "$rel/ModuleCache" --exclude "$rel/index")
+          while IFS= read -r exe; do
+            excludes+=(--exclude "$exe" --exclude "$exe.dSYM")
+          done < <(find "$rel" -maxdepth 1 -type f -perm -u+x)
+          mkdir -p "$RUNNER_TEMP/test-products"
+          start=$(date +%s)
+          tar -cf "$RUNNER_TEMP/test-products/test-products.tar" "${excludes[@]}" .build Package.resolved
+          echo "tar took $(( $(date +%s) - start )) s."
+          ls -l "$RUNNER_TEMP/test-products/test-products.tar"
+          tar -tf "$RUNNER_TEMP/test-products/test-products.tar" | grep -E '\.xctest/Contents/MacOS/[^/]+$'
+          echo "Test products: $(du -h "$RUNNER_TEMP/test-products/test-products.tar" | cut -f1) before compression." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the test products
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-products
+          path: ${{ runner.temp }}/test-products/test-products.tar
+          compression-level: 1
+          retention-days: 1
+          overwrite: true
+
+  metallib:
+    name: Build the full Metal library
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select the newest release of Xcode 26
+        id: xcode
+        uses: ./.github/actions/select-xcode
+
+      - name: Read the mlx pin
+        id: pin
+        run: echo "mlx=$(git rev-parse HEAD:Source/Cmlx/mlx)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Metal library
+        # The library depends only on the mlx submodule, the Metal compiler and the build script.
+        # The key also has the generated Metal sources, which change only with the mlx pin.
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/metallib-cache
+          key: ${{ runner.os }}-metallib-xcode-${{ steps.xcode.outputs.version }}-mlx-${{ steps.pin.outputs.mlx }}-${{ hashFiles('scripts/build-metallib.sh', 'Source/Cmlx/mlx-generated/**') }}
 
       - name: Build the full Metal library
         # A SwiftPM command-line build compiles no Metal kernels, so the tests find no metallib.
-        run: scripts/build-metallib.sh
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1 Source/Cmlx/mlx
+          start=$(date +%s)
+          scripts/build-metallib.sh build build/metallib-cache/mlx.metallib
+          seconds=$(( $(date +%s) - start ))
+          echo "Metal library build: $(( seconds / 60 )) min $(( seconds % 60 )) s." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the Metal library
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/metallib-cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Report the Metal library
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          ls -l build/metallib-cache/mlx.metallib
+          echo "Metal library: $(du -h build/metallib-cache/mlx.metallib | cut -f1). Cache hit: ${CACHE_HIT:-false}." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the Metal library
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metallib
+          path: build/metallib-cache/mlx.metallib
+          retention-days: 1
+          overwrite: true
+
+  test:
+    name: Test shard ${{ matrix.shard }}
+    needs: [build, metallib]
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.build.outputs.shards) }}
+    env:
+      BIN: ${{ needs.build.outputs.bin }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # swift test reads the package manifest, and the Cmlx target lists files in the submodules.
+          submodules: recursive
+
+      - name: Select the newest release of Xcode 26
+        uses: ./.github/actions/select-xcode
+
+      - name: Download the test products
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: test-products
+          path: ${{ runner.temp }}/test-products
+
+      - name: Download the Metal library
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: metallib
+          path: ${{ runner.temp }}/metallib
+
+      - name: Unpack the test products
+        run: |
+          start=$(date +%s)
+          tar -xf "$RUNNER_TEMP/test-products/test-products.tar"
+          echo "tar took $(( $(date +%s) - start )) s."
+          scripts/build-metallib.sh install "$RUNNER_TEMP/metallib/mlx.metallib"
+          echo "RESULTS=$RUNNER_TEMP/test-results" >> "$GITHUB_ENV"
+          echo "PLAN=$RUNNER_TEMP/test-results/plan" >> "$GITHUB_ENV"
+
+      - name: List the tests and plan the shards
+        # Each shard lists the tests and makes the same plan, because the plan depends only on the list and test-shards.json.
+        # The guard: this step fails if a listed test is in no shard or in two shards.
+        # The final job checks that all shards made the same plan.
+        id: plan
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -o pipefail
+          mkdir -p "$PLAN"
+          # Listing loads the test bundle, so it needs the Metal library in the bundle.
+          swift test list --skip-build --disable-swift-testing > "$RUNNER_TEMP/xctest-list.txt"
+          swift test list --skip-build --disable-xctest > "$RUNNER_TEMP/swift-testing-list.txt"
+          echo "XCTest: $(wc -l < "$RUNNER_TEMP/xctest-list.txt") lines. Swift Testing: $(wc -l < "$RUNNER_TEMP/swift-testing-list.txt") lines."
+          python3 .github/scripts/test-shards.py plan --config .github/scripts/test-shards.json \
+            --xctest "$RUNNER_TEMP/xctest-list.txt" --swift-testing "$RUNNER_TEMP/swift-testing-list.txt" --out "$PLAN" \
+            --summary-shard "$SHARD"
+          plan="$PLAN/shard-$SHARD.json"
+          cat "$plan"
+          python3 - "$plan" >> "$GITHUB_OUTPUT" <<'EOF'
+          import json, sys
+          shard = json.load(open(sys.argv[1]))
+          print(f"isolated={str(shard['isolated']).lower()}")
+          print(f"swift_testing={str(shard['swift_testing']).lower()}")
+          print(f"xctest={'true' if shard['xctest'] else 'false'}")
+          EOF
 
       - name: Run allocation-cap test in a fresh process
+        if: steps.plan.outputs.isolated == 'true'
         env:
           MLX_TEST_PROCESS_CAP: "1"
         run: |
           set -o pipefail
-          cap_log="$RUNNER_TEMP/swift-cap-test.log"
-          swift test --skip-build --enable-code-coverage --filter ProcessAllocationCapTests 2>&1 | tee "$cap_log"
+          cap_log="$RESULTS/cap.log"
+          swift test --skip-build --enable-code-coverage --disable-swift-testing --filter ProcessAllocationCapTests 2>&1 | tee "$cap_log"
+          cp "$BIN/codecov/default.profdata" "$RESULTS/cap.profdata"
           if ! grep -Eq "^Test Case '.*ProcessAllocationCapTests testFreshProcessSwiftCap]' passed \(" "$cap_log" ||
              grep -Eq "^Test Case '.*' (failed|skipped) \(" "$cap_log"; then
             echo "::error::The fresh-process allocation-cap test must execute and pass without skips."
             exit 1
           fi
 
-      - name: Run the tests
+      - name: Run the multi-process distributed tests
+        # Each ring class forms one group per process, so each class runs in its own xctest process.
+        # The harness starts the other ranks again from the same test bundle.
+        if: steps.plan.outputs.isolated == 'true'
         env:
+          MLX_TEST_DISTRIBUTED: "1"
+        run: |
+          set -o pipefail
+          bundle="$BIN/mlx-swiftPackageTests.xctest"
+          if [ ! -d "$bundle" ]; then
+            bundle="$BIN/MLXTests.xctest"
+          fi
+          if [ ! -d "$bundle" ]; then
+            echo "::error::No test bundle under $BIN."
+            exit 1
+          fi
+          for suite in DistributedRingTests DistributedNNRingTests; do
+            log="$RESULTS/ring-$suite.log"
+            xcrun xctest -XCTest "$suite" "$bundle" 2>&1 | tee "$log"
+            if ! grep -Eq "^Test Suite '$suite' passed" "$log" ||
+               grep -Eq "^Test Case '.*' (failed|skipped) \(" "$log"; then
+              echo "::error::$suite must execute and pass without skips."
+              exit 1
+            fi
+          done
+
+      - name: Run the XCTest tests of this shard
+        if: steps.plan.outputs.xctest == 'true'
+        env:
+          SHARD: ${{ matrix.shard }}
           # MLX reads this flag once, when it opens the Metal device. It turns on the sorted expert-tile route for the whole test run.
           # Today only the allow-listed shapes in SortedGatherQuantizedMMTests take that route.
           # Without the flag, five tests in that suite skip.
@@ -117,38 +336,117 @@ jobs:
           MLX_RESOURCE_LIMIT: "50000"
         run: |
           set -o pipefail
-          swift test --skip-build --enable-code-coverage --skip ProcessAllocationCapTests 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          log="$RESULTS/xctest.log"
+          filter=$(cat "$PLAN/shard-$SHARD.regex")
+          swift test --skip-build --enable-code-coverage --disable-swift-testing --filter "$filter" 2>&1 | tee "$log"
+          cp "$BIN/codecov/default.profdata" "$RESULTS/xctest.profdata"
           # XCTest prints a summary line for each suite. The last line covers the whole run.
-          summary=$(grep -E 'Executed [0-9]+ tests?, with' "$RUNNER_TEMP/swift-test.log" | tail -n 1 || true)
-          echo "Test summary: $summary" >> "$GITHUB_STEP_SUMMARY"
+          summary=$(grep -E 'Executed [0-9]+ tests?, with' "$log" | tail -n 1 || true)
+          echo "Shard $SHARD XCTest summary: $summary" >> "$GITHUB_STEP_SUMMARY"
           if ! echo "$summary" | grep -Eq 'Executed [1-9][0-9]* tests?, with'; then
             echo "::error::The test run executed zero tests."
             exit 1
           fi
-          # The cap test ran in its own process. Only the opt-in perf test and
+          # The cap test and the ring tests ran in their own processes. Only the opt-in perf test and
           # the AOT-only retract test on NAX hardware may skip here.
-          unexpected=$(grep -E "^Test Case '.*' skipped \(" "$RUNNER_TEMP/swift-test.log" | grep -Ev "^Test Case '-\[[^.]+\.(QwenExpertTilePerfTests testQwenRoutedPrefillUnitTimings|SortedGatherQuantizedMMTests testQwenSortednessViolationRetractsToLegacyRoute)\]' skipped \(" || true)
+          unexpected=$(grep -E "^Test Case '.*' skipped \(" "$log" | grep -Ev "^Test Case '-\[[^.]+\.(QwenExpertTilePerfTests testQwenRoutedPrefillUnitTimings|SortedGatherQuantizedMMTests testQwenSortednessViolationRetractsToLegacyRoute)\]' skipped \(" || true)
           if [ -n "$unexpected" ]; then
             echo "::error::Unexpected skipped tests:"
             echo "$unexpected"
             exit 1
           fi
 
+      - name: Run the Swift Testing tests
+        # Swift Testing runs its tests in parallel in one process, so all of them run in one shard.
+        if: steps.plan.outputs.swift_testing == 'true'
+        env:
+          SHARD: ${{ matrix.shard }}
+          MLX_GATHER_QMM_EXPERT_SLICES: "1"
+          MLX_RESOURCE_LIMIT: "50000"
+        run: |
+          set -o pipefail
+          log="$RESULTS/swift-testing.log"
+          swift test --skip-build --enable-code-coverage --disable-xctest 2>&1 | tee "$log"
+          cp "$BIN/codecov/default.profdata" "$RESULTS/swift-testing.profdata"
+          summary=$(grep -E 'Test run with [0-9]+ tests?' "$log" | tail -n 1 || true)
+          echo "Shard $SHARD Swift Testing summary: $summary" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the shard results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-results
+          retention-days: 7
+          overwrite: true
+
+  build-and-test:
+    # This job keeps the check name of the old single job.
+    name: build-and-test
+    needs: [build, metallib, test]
+    if: ${{ !cancelled() }}
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Check the results of the other jobs
+        env:
+          BUILD: ${{ needs.build.result }}
+          METALLIB: ${{ needs.metallib.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          echo "build: $BUILD, metallib: $METALLIB, test: $TEST"
+          if [ "$BUILD" != success ] || [ "$METALLIB" != success ] || [ "$TEST" != success ]; then
+            echo "::error::A build or test job did not succeed."
+            exit 1
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select the newest release of Xcode 26
+        uses: ./.github/actions/select-xcode
+
+      - name: Download the shard results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: test-results-*
+          path: ${{ runner.temp }}/test-results
+
+      - name: Check that every test ran exactly once
+        run: |
+          python3 .github/scripts/test-shards.py verify --config .github/scripts/test-shards.json \
+            --results "$RUNNER_TEMP/test-results"
+
+      - name: Download the test products
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: test-products
+          path: ${{ runner.temp }}/test-products
+
       - name: Report line coverage
         # Counts the Swift sources under Source/MLX* only. The target is 80% line coverage. It is reported, not enforced.
+        env:
+          BIN: ${{ needs.build.outputs.bin }}
         run: |
-          bin=$(swift build --show-bin-path)
+          tar -xf "$RUNNER_TEMP/test-products/test-products.tar"
+          bin="$GITHUB_WORKSPACE/$BIN"
           # SwiftBuild emits one bundle per test target; the native SwiftPM
           # build system emits the combined package-test bundle.
           binary="$bin/MLXTests.xctest/Contents/MacOS/MLXTests"
           if [ ! -f "$binary" ]; then
             binary="$bin/mlx-swiftPackageTests.xctest/Contents/MacOS/mlx-swiftPackageTests"
           fi
-          profile="$bin/codecov/default.profdata"
-          if [ ! -f "$binary" ] || [ ! -f "$profile" ]; then
-            echo "::error::Missing test binary or coverage profile under $bin."
+          # Merge the coverage profiles of all shards.
+          profiles=()
+          while IFS= read -r file; do
+            profiles+=("$file")
+          done < <(find "$RUNNER_TEMP/test-results" -name '*.profdata' | sort)
+          printf '%s\n' "${profiles[@]}"
+          if [ ! -f "$binary" ] || [ "${#profiles[@]}" -eq 0 ]; then
+            echo "::error::Missing test binary under $bin or coverage profiles under $RUNNER_TEMP/test-results."
             exit 1
           fi
+          profile="$RUNNER_TEMP/merged.profdata"
+          xcrun llvm-profdata merge -sparse "${profiles[@]}" -o "$profile"
           # report FILE DIR... writes the llvm-cov report for the Swift files under the directories.
           # llvm-cov ignores a path that does not exist and then reports every file, so the function checks each path first.
           report() {
@@ -219,6 +517,7 @@ jobs:
             cat "$RUNNER_TEMP/coverage-rows.md"
             echo
             echo "The denominator is the host Swift code under \`Source/MLX*\` that the test binary links: $lines_total lines. It leaves out \`Tests/\` and the dependencies in \`.build/\`."
+            echo "The profile is the merge of the profiles of all shards: ${#profiles[@]} files."
             echo "SwiftPM compiles the Cmlx C and C++ core without instrumentation, so it is not measured. The test bundle does not link MLXFast, MLXFFT, MLXLinalg and MLXRandom. These are deprecated shims that forward to APIs in \`Source/MLX\` (MLXFast.swift, FFT.swift, Linalg.swift, Random.swift), and those APIs are measured in the \`Source/MLX\` row. Metal shader code is outside every coverage tool."
             echo "Swift emits no branch counters, so the Regions column is the proxy for branch coverage. The 80% target is reported only. The job does not fail below it."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -229,3 +528,4 @@ jobs:
           name: coverage-report
           path: ${{ runner.temp }}/coverage-report.txt
           retention-days: 7
+          overwrite: true

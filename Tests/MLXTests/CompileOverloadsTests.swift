@@ -15,7 +15,6 @@ import XCTest
 class CompileOverloadsTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     /// Output `j` is the sum of `x[i] * (i + j + 1)`, minus `j`.
@@ -66,7 +65,7 @@ class CompileOverloadsTests: XCTestCase {
     }
 
     func testOneInput() {
-        var n2 = 0
+        nonisolated(unsafe) var n2 = 0
         let c2 = compile { (a: MLXArray) -> (MLXArray, MLXArray) in
             n2 += 1
             let r = Self.reference([a], outputs: 2)
@@ -78,7 +77,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n2, 1, "the second call traced the function again")
 
-        var n3 = 0
+        nonisolated(unsafe) var n3 = 0
         let c3 = compile { (a: MLXArray) -> (MLXArray, MLXArray, MLXArray) in
             n3 += 1
             let r = Self.reference([a], outputs: 3)
@@ -90,7 +89,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n3, 1, "the second call traced the function again")
 
-        var n4 = 0
+        nonisolated(unsafe) var n4 = 0
         let c4 = compile { (a: MLXArray) -> (MLXArray, MLXArray, MLXArray, MLXArray) in
             n4 += 1
             let r = Self.reference([a], outputs: 4)
@@ -104,7 +103,7 @@ class CompileOverloadsTests: XCTestCase {
     }
 
     func testTwoInputs() {
-        var n2 = 0
+        nonisolated(unsafe) var n2 = 0
         let c2 = compile { (a: MLXArray, b: MLXArray) -> (MLXArray, MLXArray) in
             n2 += 1
             let r = Self.reference([a, b], outputs: 2)
@@ -116,7 +115,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n2, 1, "the second call traced the function again")
 
-        var n3 = 0
+        nonisolated(unsafe) var n3 = 0
         let c3 = compile { (a: MLXArray, b: MLXArray) -> (MLXArray, MLXArray, MLXArray) in
             n3 += 1
             let r = Self.reference([a, b], outputs: 3)
@@ -128,7 +127,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n3, 1, "the second call traced the function again")
 
-        var n4 = 0
+        nonisolated(unsafe) var n4 = 0
         let c4 = compile {
             (a: MLXArray, b: MLXArray) -> (MLXArray, MLXArray, MLXArray, MLXArray) in
             n4 += 1
@@ -143,7 +142,7 @@ class CompileOverloadsTests: XCTestCase {
     }
 
     func testThreeInputs() {
-        var n2 = 0
+        nonisolated(unsafe) var n2 = 0
         let c2 = compile { (a: MLXArray, b: MLXArray, c: MLXArray) -> (MLXArray, MLXArray) in
             n2 += 1
             let r = Self.reference([a, b, c], outputs: 2)
@@ -155,7 +154,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n2, 1, "the second call traced the function again")
 
-        var n3 = 0
+        nonisolated(unsafe) var n3 = 0
         let c3 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray) -> (MLXArray, MLXArray, MLXArray) in
             n3 += 1
@@ -168,7 +167,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n3, 1, "the second call traced the function again")
 
-        var n4 = 0
+        nonisolated(unsafe) var n4 = 0
         let c4 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray) -> (MLXArray, MLXArray, MLXArray, MLXArray) in
             n4 += 1
@@ -183,7 +182,7 @@ class CompileOverloadsTests: XCTestCase {
     }
 
     func testFourInputs() {
-        var n1 = 0
+        nonisolated(unsafe) var n1 = 0
         let c1 = compile { (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray) -> MLXArray in
             n1 += 1
             return Self.reference([a, b, c, d], outputs: 1)[0]
@@ -193,7 +192,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n1, 1, "the second call traced the function again")
 
-        var n2 = 0
+        nonisolated(unsafe) var n2 = 0
         let c2 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray) -> (MLXArray, MLXArray) in
             n2 += 1
@@ -206,7 +205,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n2, 1, "the second call traced the function again")
 
-        var n3 = 0
+        nonisolated(unsafe) var n3 = 0
         let c3 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray) -> (MLXArray, MLXArray, MLXArray)
             in
@@ -220,7 +219,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n3, 1, "the second call traced the function again")
 
-        var n4 = 0
+        nonisolated(unsafe) var n4 = 0
         let c4 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray) -> (
                 MLXArray, MLXArray, MLXArray, MLXArray
@@ -237,7 +236,7 @@ class CompileOverloadsTests: XCTestCase {
     }
 
     func testFiveInputs() {
-        var n1 = 0
+        nonisolated(unsafe) var n1 = 0
         let c1 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray) -> MLXArray in
             n1 += 1
@@ -248,7 +247,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n1, 1, "the second call traced the function again")
 
-        var n2 = 0
+        nonisolated(unsafe) var n2 = 0
         let c2 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray) -> (
                 MLXArray, MLXArray
@@ -263,7 +262,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n2, 1, "the second call traced the function again")
 
-        var n3 = 0
+        nonisolated(unsafe) var n3 = 0
         let c3 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray) -> (
                 MLXArray, MLXArray, MLXArray
@@ -278,7 +277,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n3, 1, "the second call traced the function again")
 
-        var n4 = 0
+        nonisolated(unsafe) var n4 = 0
         let c4 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray) -> (
                 MLXArray, MLXArray, MLXArray, MLXArray
@@ -295,7 +294,7 @@ class CompileOverloadsTests: XCTestCase {
     }
 
     func testSixInputs() {
-        var n1 = 0
+        nonisolated(unsafe) var n1 = 0
         let c1 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray)
                 -> MLXArray in
@@ -307,7 +306,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n1, 1, "the second call traced the function again")
 
-        var n2 = 0
+        nonisolated(unsafe) var n2 = 0
         let c2 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray)
                 -> (MLXArray, MLXArray) in
@@ -321,7 +320,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n2, 1, "the second call traced the function again")
 
-        var n3 = 0
+        nonisolated(unsafe) var n3 = 0
         let c3 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray)
                 -> (MLXArray, MLXArray, MLXArray) in
@@ -335,7 +334,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n3, 1, "the second call traced the function again")
 
-        var n4 = 0
+        nonisolated(unsafe) var n4 = 0
         let c4 = compile {
             (a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray)
                 -> (MLXArray, MLXArray, MLXArray, MLXArray) in
@@ -351,7 +350,7 @@ class CompileOverloadsTests: XCTestCase {
     }
 
     func testSevenInputs() {
-        var n1 = 0
+        nonisolated(unsafe) var n1 = 0
         let c1 = compile {
             (
                 a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray,
@@ -365,7 +364,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n1, 1, "the second call traced the function again")
 
-        var n2 = 0
+        nonisolated(unsafe) var n2 = 0
         let c2 = compile {
             (
                 a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray,
@@ -381,7 +380,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n2, 1, "the second call traced the function again")
 
-        var n3 = 0
+        nonisolated(unsafe) var n3 = 0
         let c3 = compile {
             (
                 a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray,
@@ -397,7 +396,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n3, 1, "the second call traced the function again")
 
-        var n4 = 0
+        nonisolated(unsafe) var n4 = 0
         let c4 = compile {
             (
                 a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray,
@@ -415,7 +414,7 @@ class CompileOverloadsTests: XCTestCase {
     }
 
     func testEightInputs() {
-        var n1 = 0
+        nonisolated(unsafe) var n1 = 0
         let c1 = compile {
             (
                 a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray,
@@ -429,7 +428,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n1, 1, "the second call traced the function again")
 
-        var n2 = 0
+        nonisolated(unsafe) var n2 = 0
         let c2 = compile {
             (
                 a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray,
@@ -445,7 +444,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n2, 1, "the second call traced the function again")
 
-        var n3 = 0
+        nonisolated(unsafe) var n3 = 0
         let c3 = compile {
             (
                 a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray,
@@ -461,7 +460,7 @@ class CompileOverloadsTests: XCTestCase {
         }
         XCTAssertEqual(n3, 1, "the second call traced the function again")
 
-        var n4 = 0
+        nonisolated(unsafe) var n4 = 0
         let c4 = compile {
             (
                 a: MLXArray, b: MLXArray, c: MLXArray, d: MLXArray, e: MLXArray, f: MLXArray,
@@ -483,7 +482,7 @@ class CompileOverloadsTests: XCTestCase {
     /// With it, the first trace serves the new shape.
     func testShapelessFlag() {
         for shapeless in [false, true] {
-            var traces = 0
+            nonisolated(unsafe) var traces = 0
             let compiled = compile(shapeless: shapeless) {
                 (a: MLXArray, b: MLXArray) -> (MLXArray, MLXArray) in
                 traces += 1

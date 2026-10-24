@@ -10,7 +10,6 @@ import XCTest
 class ArrayAtCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // index 0 is used three times, index 2 and 3 once, index 1 never

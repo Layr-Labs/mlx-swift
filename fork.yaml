@@ -52,10 +52,11 @@ def:
             Both pins are merges of upstream `main` into the forks (2026-10-22). The `mlx` pin
             keeps the core compiler-capacity retry for 512- and 1024-thread Metal groups. The
             `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
-            own C API. The pins are `mlx` ff4bb35b (the head of Layr-Labs/mlx#43, the compile
-            cache erase fix, based on Layr-Labs/mlx `main` with Layr-Labs/mlx#40, float16 and
-            bfloat16 floor divide in float32) and `mlx-c` 004c735f, whose CMake `GIT_TAG`
-            names the same `mlx` commit.
+            own C API. The pins are `mlx` 11ff5cf3 and `mlx-c` 004c735f. `mlx` 11ff5cf3 is
+            ff4bb35b (the head of Layr-Labs/mlx#43, the compile cache erase fix, based on
+            Layr-Labs/mlx `main` with Layr-Labs/mlx#40, float16 and bfloat16 floor divide in
+            float32) plus cached custom-kernel sources, a host-only change; the `mlx-c` CMake
+            `GIT_TAG` still names ff4bb35b, which SwiftPM builds never read.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"

@@ -24,5 +24,39 @@ final class ProcessAllocationCapTests: XCTestCase {
         let final = try Memory.processAllocationCapSnapshot()
         XCTAssertEqual(final.pendingBytes, 0)
         XCTAssertLessThanOrEqual(final.chargedBytes, final.limitBytes)
+
+        // A wrapped external page is charged while MLX holds it and refunded
+        // once when MLX releases it. MLX does not own it (upstream mlx #4634),
+        // so the release runs the wrapper deleter, not the allocator free.
+        try FinalizerCount.wait { try Memory.processAllocationCapSnapshot().unreclaimedBytes == 0 }
+        let baseline = try Memory.processAllocationCapSnapshot()
+        XCTAssertEqual(baseline.unreclaimedBytes, 0)
+        let (base, bytes, count) = makeWrappableHostPage()
+        let finalizer = FinalizerCount()
+        try autoreleasepool {
+            let wrapped = MLXArray(rawPointer: base, [count], dtype: .float32) {
+                finalizer.increment()
+            }
+            let held = try Memory.processAllocationCapSnapshot()
+            XCTAssertEqual(held.chargedBytes, baseline.chargedBytes + bytes)
+            XCTAssertEqual(held.liveBytes, baseline.liveBytes + bytes)
+            let doubled = wrapped * 2
+            eval(doubled)
+            XCTAssertEqual(doubled.asArray(Float.self), [Float](repeating: 2, count: count))
+        }
+        Memory.clearCache()
+        try FinalizerCount.wait {
+            let charged = try Memory.processAllocationCapSnapshot().chargedBytes
+            return finalizer.current > 0 && charged == baseline.chargedBytes
+        }
+        let released = try Memory.processAllocationCapSnapshot()
+        XCTAssertEqual(finalizer.current, 1)
+        XCTAssertEqual(released.chargedBytes, baseline.chargedBytes)
+        XCTAssertEqual(released.liveBytes, baseline.liveBytes)
+        XCTAssertEqual(released.cachedBytes, baseline.cachedBytes)
+        XCTAssertEqual(released.pendingBytes, 0)
+        XCTAssertEqual(released.unreclaimedBytes, 0)
+        // Keep the page if MLX can still use it.
+        if finalizer.current == 1 { base.deallocate() }
     }
 }

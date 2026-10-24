@@ -119,6 +119,17 @@ final class CompiledFunction: @unchecked (Sendable) {
         }
     }
 
+    /// Device type, device index and stream index of `stream`.
+    static func streamKey(_ stream: Stream) -> [UInt64] {
+        let device = stream.device
+        var deviceIndex: Int32 = 0
+        mlx_device_get_index(&deviceIndex, device.ctx)
+        return [
+            device.deviceType == .cpu ? 0 : 1, UInt64(UInt32(bitPattern: deviceIndex)),
+            UInt64(UInt32(bitPattern: Int32(stream.index))),
+        ]
+    }
+
     /// Must be called under evalLock, including when sealed state is rebound.
     private func eraseCaches() {
         for cache in caches.values {
@@ -263,7 +274,15 @@ final class CompiledFunction: @unchecked (Sendable) {
         // evalLock is already held by call(_:) and covers everything through
         // mlx_closure_apply below, which is where the trace runs.
         var compiled = mlx_closure_new()
-        let compileStatus = mlx_detail_compile(&compiled, innerClosure, id, shapeless, [], 0)
+        // MLX keys a cached trace by the C++ thread's default stream, but the
+        // traced ops run on this task's default stream, which is task-scoped in
+        // mlx-swift (`Device.withDefaultDevice`, `Stream.withNewDefaultStream`).
+        // Key the trace by that stream as well, so a trace recorded under one
+        // device or stream is never replayed under another.
+        let streamKey = Self.streamKey(StreamOrDevice.default.stream)
+        let compileStatus = streamKey.withUnsafeBufferPointer {
+            mlx_detail_compile(&compiled, innerClosure, id, shapeless, $0.baseAddress, $0.count)
+        }
         defer {
             mlx_closure_free(compiled)
         }

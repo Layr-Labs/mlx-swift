@@ -355,6 +355,15 @@ open class QuantizedLinear: Linear, Quantized {
         constantCachedForward(x, allowFloat16: false)
     }
 
+    /// Affine FP32 rows `[..., K]`, each through MLX's single-row (M=1)
+    /// kernel as its own call would run it, with the FP32 widening of the
+    /// BF16 scales and biases that `callAsFunction` caches (one copy for
+    /// both, made on the caller's stream) instead of a fresh widening inside
+    /// every call.
+    public func independentRowsForward(_ x: MLXArray) -> MLXArray {
+        constantCachedForward(x, allowFloat16: false, independentRows: true)
+    }
+
     /// Shared arithmetic path; FP16 widening reuse is private and opt-in for
     /// an eligible packed-Hadamard caller. Ordinary quantized layers retain
     /// the established BF16-only cache contract.
@@ -378,8 +387,8 @@ open class QuantizedLinear: Linear, Quantized {
                 : offsets
         }
         let outputShape = Array(x.shape.dropLast()) + [weight.dim(0)]
-        // Only the signed-Hadamard FP32 contract opts into this branch.
-        // A leading weight dimension keeps every row at M=1, avoiding the
+        // Only the signed-Hadamard FP32 contract and `independentRowsForward`
+        // opt into this branch. A leading weight dimension keeps every row at M=1, avoiding the
         // architecture-dependent TF32 matrix path without unpacking weights.
         // Ordinary quantized callers preserve their existing operator below.
         var output: MLXArray

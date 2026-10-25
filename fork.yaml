@@ -52,7 +52,8 @@ def:
             The current pair includes the core compiler-capacity retry for 512- and
             1024-thread Metal groups without changing kernel math or dispatch geometry,
             orders the fast-synch GPU wait after every pending pass and earlier kernels
-            in its current concurrent pass, carries
+            in its current concurrent pass, makes a GPU stream wait for another GPU stream
+            on a shared event instead of spinning, keeps helper ops on the caller's stream, carries
             1 MiB JACCL frames, batches buffer retention, caches custom-kernel sources and
             streams the sealed all-sum per AES-256-GCM piece over a two-rank JACCL exchange
             (`mlx_distributed_set_streamed_seal_codec` in the vendored C header), offers
@@ -211,6 +212,9 @@ def:
             widening reuse for eligible 2-bit/group128/block1024 Hadamard
             projections; explicit `DARKBLOOM_BONSAI_F16_CONSTANT_CACHE=0`
             restores the prior path. Other callers retain the BF16-only contract.
+            `QuantizedLinear.independentRowsForward` runs affine FP32 rows through the
+            single-row kernel with the same cached constants, so batched rows no longer
+            widen them inside every quantized matmul.
           globs:
             - "Source/MLX/ConstantArrayCastCache.swift"
             - "Source/MLXNN/Quantized.swift"

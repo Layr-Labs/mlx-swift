@@ -12,10 +12,9 @@ import XCTest
 /// and plain ops, one time step at a time. Other tests check output shapes,
 /// that seeded weights give the same output, and that the state can be carried
 /// from one call to the next.
-class RecurrentTests: XCTestCase {
+class RecurrentLayerTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     private let inputSize = 3
@@ -62,7 +61,7 @@ class RecurrentTests: XCTestCase {
     }
 
     /// The GRU as upstream MLX defines it. When `hidden` is nil the first step
-    /// has no hidden term, and the `bhn` bias is part of that term.
+    /// has no `wh` term, but the `bhn` bias is still added, gated by `r`.
     private func referenceGRU(_ gru: GRU, _ x: MLXArray, hidden: MLXArray? = nil) -> MLXArray {
         let h3 = gru.hiddenSize
         var h = hidden
@@ -86,6 +85,10 @@ class RecurrentTests: XCTestCase {
                     hn = hn + bhn
                 }
                 n = n + sigmoid(r) * hn
+            } else if let bhn = gru.bhn {
+                // Without a hidden state the hidden bias is still applied, gated by r,
+                // as in Python MLX (ml-explore/mlx-swift #477).
+                n = n + sigmoid(r) * bhn
             }
             n = tanh(n)
             let zs = sigmoid(z)

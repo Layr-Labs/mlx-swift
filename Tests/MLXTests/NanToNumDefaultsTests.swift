@@ -9,7 +9,6 @@ import XCTest
 class NanToNumDefaultsTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     /// Without posInf and negInf, infinities become the largest finite values of the

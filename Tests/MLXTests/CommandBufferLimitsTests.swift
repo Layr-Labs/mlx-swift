@@ -25,7 +25,6 @@ class CommandBufferLimitsTests: XCTestCase {
     private static let defaults = GPU.CommandBufferLimits(operations: 0, megabytes: 0)
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     func testNestedScopesRestoreThePreviousLimits() {

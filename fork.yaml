@@ -167,6 +167,16 @@ def:
             - "Source/MLX/EvalProbe.swift"
             - "Source/MLX/Transforms+Eval.swift"
             - "Tests/MLXTests/NativeEvaluationSerializationTests.swift"
+        - title: "MLXArray: share an array without a graph node"
+          description: |
+            `MLXArray.sharingArray()` returns a new `MLXArray` object for the same array
+            (`copyContext()`): what `self[.ellipsis]` returns, because a full-range slice is
+            the array itself, but without the indexing work, a graph node or a data copy.
+            Assigning through the new object (`new[...] = value`) leaves the original
+            unchanged. The GLM-5.3-Flash text cache and MTP state in `mlx-swift-lm` use it to
+            clone and adopt cached arrays.
+          globs:
+            - "Source/MLX/MLXArray.swift"
         - title: "Compile: key each trace by the task's default stream"
           description: |
             MLX keys a cached compiled trace by the C++ thread default stream. mlx-swift

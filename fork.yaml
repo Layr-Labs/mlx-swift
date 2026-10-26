@@ -56,8 +56,9 @@ def:
             commit. The `mlx` pin keeps the core compiler-capacity retry for 512- and
             1024-thread Metal groups without changing kernel math or dispatch geometry. The
             `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
-            own C API. The two-Mac cluster stack pins the cluster core and C instead. They
-            also order the fast-synch GPU wait after every pending pass on its queue, carry
+            own C API. The two-Mac cluster stack pins the cluster core and C with main
+            merged in: Layr-Labs/mlx#35 (with #33 under it) and Layr-Labs/mlx-c#15. Beyond
+            main they order the fast-synch GPU wait after every pending pass on its queue, carry
             1 MiB JACCL frames, batch buffer retention, cache custom-kernel sources and
             stream the sealed all-sum per AES-256-GCM piece over a two-rank JACCL exchange
             (`mlx_distributed_set_streamed_seal_codec` in the vendored C header), offer

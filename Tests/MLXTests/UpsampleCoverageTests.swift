@@ -112,7 +112,6 @@ private func signal(_ count: Int) -> [Float] {
 class UpsampleCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     private func check(

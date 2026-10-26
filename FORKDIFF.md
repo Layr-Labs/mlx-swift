@@ -44,10 +44,17 @@ would swallow upstream's changes after a bad rebase and defeat the gate. The
 one broad glob here, `Source/Cmlx/mlx-generated/**`, is deliberate: that tree
 is regenerated wholesale from the core pin and has no hand-written content.
 
-**Upstream sync policy (2026-09-25).** This fork does not merge or rebase onto
-upstream. `base.hash` stays fixed. An upstream fix the fork needs is ported as
-its own commit and described in its own `fork.yaml` section. The check keeps
-comparing the fork against the fixed base:
+**Upstream sync policy (2026-10-22).** The fork merges upstream `main` when
+the repository owner tells it to. It does not rebase. Each merge is a merge commit in a pull
+request, and the owner merges that pull request with a merge commit. The merge
+moves `base.hash` to the new merge-base. The pull request then checks each
+section of `fork.yaml` again. It removes a section when upstream now does the
+same thing, and it changes a section when the fork change is smaller. The
+generated trees (`Source/Cmlx/include`, `Source/Cmlx/include-framework`,
+`Source/Cmlx/mlx-generated`) are not merged by hand. They are generated again
+from the pinned submodules with `tools/update-mlx.sh`. Between merges, an
+upstream fix that the fork needs is ported as its own commit and described in
+its own `fork.yaml` section. The check compares the fork with the base:
 
 ```
 python3 -m pip install pyyaml

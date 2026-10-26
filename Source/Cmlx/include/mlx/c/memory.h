@@ -65,6 +65,7 @@ int mlx_allocation_footprint_policy_bound(size_t* res,
 int mlx_allocation_footprint_policy_maximum_extra(size_t* res,
     const mlx_allocation_footprint_policy* policy);
 
+int mlx_get_array_buffer_size(size_t* res, const mlx_vector_array arrays);
 int mlx_get_cache_memory(size_t* res);
 int mlx_get_memory_limit(size_t* res);
 int mlx_get_memory_snapshot(size_t* active, size_t* cache, size_t* peak);

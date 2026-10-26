@@ -11,7 +11,6 @@ import XCTest
 class MemoryLimitTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     func testSnapshotDelta() {

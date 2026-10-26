@@ -10,7 +10,6 @@ import XCTest
 class ArrayAccessorTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - item()

@@ -9,7 +9,6 @@ import XCTest
 class SoftMaxAxisTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     @available(*, deprecated)

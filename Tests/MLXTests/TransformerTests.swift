@@ -15,7 +15,6 @@ import XCTest
 class TransformerTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     private func assertClose(

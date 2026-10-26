@@ -278,8 +278,8 @@ extension MLXFast {
 
                 for index in 0 ..< min(outputShapes.count, outputDTypes.count) {
                     let shape = outputShapes[index]
-                    withUnsafeTemporaryAllocation(of: Int32.self, capacity: max(1, shape.count))
-                    { dims in
+                    withUnsafeTemporaryAllocation(of: Int32.self, capacity: max(1, shape.count)) {
+                        dims in
                         for (i, d) in shape.enumerated() { dims[i] = Int32(d) }
                         _ = mlx_fast_metal_kernel_config_add_output_arg(
                             config, dims.baseAddress, shape.count, outputDTypes[index].cmlxDtype)

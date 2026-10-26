@@ -379,4 +379,24 @@ extension GPU {
         }
         return try body()
     }
+
+    /// Runs `body` with the output tile of MLX's steel affine quantized
+    /// matmul (`tile`: 32 or 64 elements a side, 6432 or 3264 for 64 x 32 or
+    /// 32 x 64, 6464 for 64 x 64 with a K depth of 64; any other value: the
+    /// process's own, `MLX_QMM_STEEL_TILE`, by default 64 x 32 for 16-bit and
+    /// 32 x 64 for FP32 inputs from 256 rows) for the products this thread
+    /// encodes on a GPU without
+    /// neural accelerators, then restores the thread's previous choice.
+    /// Evaluation encodes on the thread that calls `eval`, so `body` must make
+    /// that call itself. The tile decides which threadgroup computes an
+    /// element, never its bits: every element accumulates the same K slabs
+    /// in the same order at either tile.
+    public static func withQuantizedMatmulSteelTile<R>(
+        _ tile: Int, _ body: () throws -> R
+    ) rethrows -> R {
+        var previous: Int32 = 0
+        mlx_metal_set_thread_qmm_steel_tile(Int32(clamping: tile), &previous)
+        defer { mlx_metal_set_thread_qmm_steel_tile(previous, nil) }
+        return try body()
+    }
 }

@@ -324,6 +324,18 @@ def:
           globs:
             - "Source/MLX/GPU+Metal.swift"
             - "Source/Cmlx/include/mlx/command_buffer_limits.h"
+        - title: "GPU: steel quantized-matmul tile"
+          description: |
+            `GPU.withQuantizedMatmulSteelTile(_:_:)` wraps the core's
+            `mlx_metal_set_thread_qmm_steel_tile` (header `Source/Cmlx/include/mlx/command_buffer_limits.h`):
+            the steel affine quantized matmul's output tile for the products the calling thread
+            encodes on a GPU without neural accelerators (32 x 32 as before, or another shape;
+            0 keeps the core's default: 64 x 32 for 16-bit and 32 x 64 for FP32 prompt-sized
+            products), restored on exit. Tests and benches compare the tiles' bytes and times in
+            one process.
+          globs:
+            - "Source/MLX/GPU+Metal.swift"
+            - "Source/Cmlx/include/mlx/command_buffer_limits.h"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:

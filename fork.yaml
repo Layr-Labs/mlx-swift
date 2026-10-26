@@ -49,13 +49,16 @@ def:
             `.gitmodules` points `Source/Cmlx/mlx` and `Source/Cmlx/mlx-c` at
             `Layr-Labs/mlx` / `Layr-Labs/mlx-c`; the gitlinks are advanced with each core change.
             The diff shown for the two submodule paths is the pointer change only.
-            Both pins are merges of upstream `main` into the forks (2026-10-22). The `mlx` pin
-            keeps the core compiler-capacity retry for 512- and 1024-thread Metal groups. The
-            `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
-            own C API. The pins are `mlx` ff4bb35b (the head of Layr-Labs/mlx#43, the compile
-            cache erase fix, based on Layr-Labs/mlx `main` with Layr-Labs/mlx#40, float16 and
-            bfloat16 floor divide in float32) and `mlx-c` 004c735f, whose CMake `GIT_TAG`
-            names the same `mlx` commit.
+            On `main` both pins are merges of upstream `main` into the forks (2026-10-22):
+            `mlx` ff4bb35b (the head of Layr-Labs/mlx#43, the compile cache erase fix, based
+            on Layr-Labs/mlx `main` with Layr-Labs/mlx#40, float16 and bfloat16 floor divide
+            in float32) and `mlx-c` 004c735f, whose CMake `GIT_TAG` names the same `mlx`
+            commit. The `mlx` pin keeps the core compiler-capacity retry for 512- and
+            1024-thread Metal groups. The `mlx-c` pin has the upstream C API that upstream
+            mlx-swift calls and the fork's own C API. The JACCL fixes layer pins the core
+            with Layr-Labs/mlx#33 merged into its `main`: the zeroed tail of each JACCL send
+            frame, the progress guard and the queue pairs on the advertised GID. It keeps
+            main's `mlx-c`.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"

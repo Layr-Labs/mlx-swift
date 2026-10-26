@@ -27,7 +27,6 @@ private func arrMap(_ values: [Float], _ f: (Float) -> Float) -> MLXArray {
 class MLXArrayOpsCoverageTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - Arithmetic operators

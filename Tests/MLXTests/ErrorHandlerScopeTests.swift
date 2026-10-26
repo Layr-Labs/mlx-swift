@@ -36,7 +36,6 @@ private final class MessageRecorder: @unchecked Sendable {
 class ErrorHandlerScopeTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     // MARK: - MLXError and ErrorBox

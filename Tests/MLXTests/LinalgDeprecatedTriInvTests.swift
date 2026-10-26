@@ -13,7 +13,6 @@ import struct MLX.StreamOrDevice
 class LinalgDeprecatedTriInvTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     @available(*, deprecated)

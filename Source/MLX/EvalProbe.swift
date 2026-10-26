@@ -10,19 +10,18 @@
 // provider report "the current eval has been running 11s+" — direct confirmation,
 // not the inferred signature.
 //
-// Threading: `beginEval()` / `endEval()` are called from inside
-// `evalLock.withLock { ... }` (free `eval` + `MLXArray.eval`), so writes are
-// additionally serialized by that lock and the `depth` counter handles the
-// recursive lock's nesting. The cross-thread hazard is the heartbeat thread
-// READING the state while an eval thread writes it — so the state lives behind an
-// `OSAllocatedUnfairLock` rather than `nonisolated(unsafe)` scalars (which only
-// silence the isolation check and leave a real torn-read data race).
+// Threading: the free `eval` calls `beginEval()` before it takes `evalLock` and
+// `endEval()` after the wait for the scheduled arrays returns. Since the merge of
+// upstream mlx-swift (2026-10-22), `eval` schedules under `evalLock` and waits
+// outside it, so more than one thread can be inside the bracket at a time. The
+// `depth` counter counts all of them: the probe reports the time since the first
+// open bracket started, and it clears only when the last bracket closes. The
+// state lives behind a lock rather than `nonisolated(unsafe)` scalars, because a
+// heartbeat thread reads it while eval threads write it.
 //
-// Why a lock is safe on the hot path (and the heartbeat is never blocked by a
-// wedge): the lock is held ONLY for the few nanoseconds of begin/end bookkeeping
-// — NEVER across the actual `mlx_eval` call. So when an eval wedges, the probe
-// lock is free and the heartbeat reader acquires it immediately. The lock is also
-// uncontended on writes (begin/end are serialized by `evalLock`).
+// The probe lock is held only for the begin/end bookkeeping, never across the
+// native eval. So when an eval wedges, the probe lock is free and the heartbeat
+// reader gets it immediately.
 //
 // Portability: uses Foundation `NSLock` (Darwin + swift-corelibs-foundation on
 // Linux) rather than the Darwin-only `os` `OSAllocatedUnfairLock` — `EvalProbe`
@@ -38,8 +37,8 @@ public enum EvalProbe {
     /// All probe state under one lock so cross-thread reads get a consistent,
     /// non-torn snapshot.
     private struct State {
-        /// Recursion depth of nested locked evals (writer-only; serialized by
-        /// `evalLock`). The outermost 0→1 stamps `sinceNanos`; 1→0 clears it.
+        /// Number of open eval brackets, nested or concurrent. The 0→1 entry
+        /// stamps `sinceNanos`; the 1→0 exit clears it.
         var depth: Int = 0
         /// Monotonic start (DispatchTime uptime ns) of the in-flight outermost
         /// eval; 0 means none in flight.
@@ -63,7 +62,7 @@ public enum EvalProbe {
         return body(&state)
     }
 
-    // MARK: - Writers (called inside evalLock, via begin / defer end)
+    // MARK: - Writers (called by the free `eval`, via begin / defer end)
 
     /// Mark the start of a locked eval. Only the outermost (depth 0→1) entry
     /// stamps the start, so a recursive eval reports the OUTER call's elapsed time

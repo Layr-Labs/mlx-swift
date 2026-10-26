@@ -8,7 +8,6 @@ import XCTest
 class RollMultipleAxesTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     /// The shift applies to each axis, as Python `mx.roll(a, 1, axis=(0, 1))` does.

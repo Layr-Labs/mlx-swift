@@ -5,20 +5,22 @@ import MLXNN
 import XCTest
 
 class HadamardLayerTests: XCTestCase {
-    override class func setUp() { setDefaultDevice() }
+    override class func setUp() {}
 
     func testHalfTransformsUseFloat32Intermediates() throws {
         let width = 1024
         let signs = (0 ..< width).map { Float($0 % 3 == 0 ? -1 : 1) }
         let transform = try SignedBlockHadamard(blockSize: width, signs: signs)
-        let input = MLXArray((0 ..< width).map { Float(($0 * 13) % 127 - 63) / 7 })
-            .asType(.float16)
+        // A named [Float] keeps the MLXArray initializer overloads cheap to type-check.
+        let values: [Float] = (0 ..< width).map { Float(($0 * 13) % 127 - 63) / 7 }
+        let input = MLXArray(values).asType(.float16)
         let forward = hadamardTransform(input.asType(.float32) * MLXArray(signs))
             .asType(.float16)
         let inverse = (hadamardTransform(input.asType(.float32)) * MLXArray(signs))
             .asType(.float16)
         XCTAssertEqual(transform(input).asArray(Float16.self), forward.asArray(Float16.self))
-        XCTAssertEqual(transform.inverse(input).asArray(Float16.self), inverse.asArray(Float16.self))
+        XCTAssertEqual(
+            transform.inverse(input).asArray(Float16.self), inverse.asArray(Float16.self))
     }
 
     func testEmbeddingLookupAndTiedProjection() throws {
@@ -46,8 +48,10 @@ class HadamardLayerTests: XCTestCase {
                 // Published runtime contract: rotate activations then use packed
                 // MM. Dense unfolded GEMM is a different reduction path,
                 // not an exact oracle for the published packed operation.
-                let reference = quantizedMM(transform(input), packed, scales: scales,
-                    biases: biases, groupSize: 128, bits: bits).asType(.float32)
+                let reference = quantizedMM(
+                    transform(input), packed, scales: scales,
+                    biases: biases, groupSize: 128, bits: bits
+                ).asType(.float32)
                 let actual = embedding.asLinear(input).asType(.float32)
                 XCTAssertEqual(actual.asArray(Float.self), reference.asArray(Float.self))
                 XCTAssertTrue(embedding.trainableParameters().flattened().isEmpty)
@@ -82,7 +86,8 @@ class HadamardLayerTests: XCTestCase {
             bias: MLXArray([Float(0.25), -0.25]), scales: scales, biases: biases,
             groupSize: 128, bits: 2, transform: transform, gdnLayout: layout)
         let reference =
-            quantizedMM(transform(grouped), packed,
+            quantizedMM(
+                transform(grouped), packed,
                 scales: scales, biases: biases, groupSize: 128, bits: 2)
             + MLXArray([Float(0.25), -0.25])
         XCTAssertEqual(layer(input).asArray(Float.self), reference.asArray(Float.self))
@@ -155,9 +160,11 @@ class HadamardLayerTests: XCTestCase {
                 weight: packed, scales: scales, biases: biases,
                 groupSize: 128, bits: bits, transform: transform)
             let input = weights[0 ..< 2]
-            let reference = quantizedMM(transform(input), packed,
+            let reference = quantizedMM(
+                transform(input), packed,
                 scales: scales, biases: biases, groupSize: 128, bits: bits)
-            XCTAssertEqual(linear(input).asArray(Float.self), reference.asArray(Float.self), "bits \(bits)")
+            XCTAssertEqual(
+                linear(input).asArray(Float.self), reference.asArray(Float.self), "bits \(bits)")
         }
     }
 
@@ -167,14 +174,19 @@ class HadamardLayerTests: XCTestCase {
     func testUnfoldedBasisAlgebraOnCPU() throws {
         try Device.withDefaultDevice(.cpu) {
             let width = 512
-            let transform = try SignedBlockHadamard(blockSize: 128,
+            let transform = try SignedBlockHadamard(
+                blockSize: 128,
                 signs: (0 ..< width).map { $0 % 3 == 0 ? -1 : 1 })
-            let weight = MLXArray((0 ..< 4 * width).map { Float(($0 * 13) % 31 - 15) / 16 }, [4, width])
+            let weight = MLXArray(
+                (0 ..< 4 * width).map { Float(($0 * 13) % 31 - 15) / 16 }, [4, width])
             let (packed, scales, biases) = quantized(weight, groupSize: 128, bits: 2)
-            let layer = try HadamardQuantizedLinear(weight: packed, scales: scales,
+            let layer = try HadamardQuantizedLinear(
+                weight: packed, scales: scales,
                 biases: biases, groupSize: 128, bits: 2, transform: transform)
-            let unfolded = transform.inverse(dequantized(packed, scales: scales,
-                biases: biases, groupSize: 128, bits: 2))
+            let unfolded = transform.inverse(
+                dequantized(
+                    packed, scales: scales,
+                    biases: biases, groupSize: 128, bits: 2))
             let reference = weight[0 ..< 2].matmul(unfolded.T)
             let delta = layer(weight[0 ..< 2]) - reference
             let relative = (delta * delta).sum().sqrt() / (reference * reference).sum().sqrt()

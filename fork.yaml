@@ -7,10 +7,10 @@ base:
   name: ml-explore/mlx-swift
   url: https://github.com/ml-explore/mlx-swift
   # The upstream commit this fork sits on. CI (`scripts/check_forkdiff.py`)
-  # requires this to equal `git merge-base HEAD upstream/main`, so a rebase
-  # onto newer upstream fails the gate until the hash — and the sections
-  # below — are brought up to date. Upstream main as of 2026-06-17.
-  hash: e23ae6b2cf96737bbd31a34ed304123162f8c409
+  # requires this to equal `git merge-base HEAD upstream/main`. Each merge of
+  # upstream moves this hash, and the sections below must then match again.
+  # Upstream main ce46846 of 2026-10-22, merged into the fork on 2026-10-22.
+  hash: ce4684631d840d9cbf8dea636749b8c068e1d6ae
 fork:
   name: Layr-Labs/mlx-swift
   url: https://github.com/Layr-Labs/mlx-swift
@@ -49,31 +49,44 @@ def:
             `.gitmodules` points `Source/Cmlx/mlx` and `Source/Cmlx/mlx-c` at
             `Layr-Labs/mlx` / `Layr-Labs/mlx-c`; the gitlinks are advanced with each core change.
             The diff shown for the two submodule paths is the pointer change only.
+            Both pins are merges of upstream `main` into the forks (2026-10-22). The `mlx` pin
+            keeps the core compiler-capacity retry for 512- and 1024-thread Metal groups. The
+            `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
+            own C API. The pins are `mlx` ff4bb35b (the head of Layr-Labs/mlx#43, the compile
+            cache erase fix, based on Layr-Labs/mlx `main` with Layr-Labs/mlx#40, float16 and
+            bfloat16 floor divide in float32) and `mlx-c` 004c735f, whose CMake `GIT_TAG`
+            names the same `mlx` commit.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"
             - "Source/Cmlx/mlx-c"
         - title: "Package manifest and Xcode project"
           description: |
-            `Package.swift` exposes `Cmlx` as a public library product (so downstream Swift, e.g.
-            a distributed provider, can link the C API directly), compiles the `mlx-c`
-            distributed wrappers, and wires the JACCL real-backend sources in through a
-            compile-time conditional — deviating from upstream's "do not build distributed
-            support (yet)". The Xcode project and xcconfig pick up the new Swift files and
-            headers; `tools/update-mlx*.sh` regenerate the embedded sources against the pinned
-            forks. `tools/fix-metal-includes.sh` also copies `dot.metal` and
-            `gather_mm_offsets.metal`, so the SwiftPM `default.metallib` carries the two kernels
-            that the core loads by name with no JIT fallback. The script does not copy
-            `fence.metal`: upstream builds `fence` only at Metal 3.2 or newer, and this package
-            targets macOS 14.0 (Metal 3.1). Thus the SwiftPM `default.metallib` has no `fence`
-            kernels, and `MLX_METAL_FAST_SYNCH=1` needs a metallib built at Metal 3.2 or newer,
-            such as the CMake full-AOT `mlx.metallib`.
+            `Package.swift` exposes `Cmlx` as a public library product, so downstream Swift
+            (for example a distributed provider) can link the C API directly. It excludes the
+            vendored `mlx-c/tests` programs from library source discovery, because each one
+            defines `main()`. `MLX_VERSION` is 0.32.2 to match the pinned core, in `Package.swift`
+            and in the Xcode configuration. The `MLXTests` target depends on `MLXLinalg`, so a
+            test can call the deprecated `MLXLinalg.triInv`. The Xcode project lists the
+            mirrored `gemma4_expert_qmm.h` header. The non-CUDA builds also exclude
+            `cusolver_utils.cpp` and the Windows-only `wddm.cpp`, which the pinned core adds
+            under `backend/cuda`. Upstream builds JACCL, the ring backend and
+            the distributed C API itself since its 2026-10 merges, so the fork no longer changes
+            that wiring.
+            `tools/fix-metal-includes.sh` also copies `gather_mm_offsets.metal`,
+            `gated_delta_update.metal`, `gated_delta_update_vjp.metal` and
+            `scaled_dot_product_attention_vjp.metal`, so the SwiftPM `default.metallib` carries
+            those kernels. The pinned core loads them by name with no JIT fallback. The script does not copy `fence.metal`: upstream builds `fence` only at
+            Metal 3.2 or newer, and this package targets macOS 14.0 (Metal 3.1). Thus the
+            SwiftPM `default.metallib` has no `fence` kernels, and `MLX_METAL_FAST_SYNCH=1`
+            needs a metallib built at Metal 3.2 or newer, such as the CMake full-AOT
+            `mlx.metallib`. `tools/update-mlx-xcodeproj.sh` mirrors the Gemma 4 expert-QMM
+            diagnostics header into `include-framework` and keeps its C-mode `MLX_API`
+            fallback.
           globs:
             - "Package.swift"
-            - "Source/Cmlx/mlx-conditional/jaccl_conditional.cpp"
             - "xcode/**"
             - "tools/fix-metal-includes.sh"
-            - "tools/update-mlx.sh"
             - "tools/update-mlx-xcodeproj.sh"
     - title: "C headers mirrored from the pinned forks"
       description: |
@@ -95,8 +108,14 @@ def:
         leaves the JIT source inconsistent — so every kernel change in the `mlx` fork
         (qmv_wide, the E=256 expert-tile route, GPT-OSS MXFP4, FP32 SDPA partials, quantized bias
         sums, segmented NAX GEMM, searchsorted/gemv/dot additions from upstream 0.32) shows up
-        here as regenerated text. No hand edits; the corresponding dispatch mirrors
+        here as regenerated text. Legacy and NAX quantized copies carry partial-tile
+        bounds fixes; NAX matches the core's reverted inactive-group optimization.
+        All four quantized loaders have distinct symbols to prevent AOT linkage
+        from mixing incompatible affine/FP or legacy/NAX implementations.
+        No hand edits; the corresponding dispatch mirrors
         (`quantized.cpp`, `steel_*.cpp`) are regenerated alongside.
+        SortedGatherQuantizedTailTests checks exact expert projections, partial
+        reduction/output tiles, packing widths and NaN rows across quantization modes.
       globs:
         - "Source/Cmlx/mlx-generated/**"
     - title: "Swift runtime surface"
@@ -109,48 +128,51 @@ def:
             byte OOM — freed buffers recycle into a size-keyed cache trimmed only by bytes).
             `AllocationFootprint` adds coherent accounting snapshots and checked footprint
             policy from the forked allocator so a serving engine can budget KV and weights
-            against real numbers.
+            against real numbers. `Memory+AllocationCap` exposes install-once Metal backing
+            enforcement and coherent cap snapshots through the GLMCalibration SPI. The core
+            owns page-aligned no-copy backing and returns credit only after its Metal
+            deallocator releases the pages; host memory and driver overhead are not capped.
+            The pinned core's footprint policy includes a VM-page minimum before
+            cache-reuse allowance for positive requests, covering page-backed
+            subpage buffers even for a policy captured before cap installation.
+            ALLOCATION-CAP.md distinguishes this per-buffer bound from cap credit
+            and host/OS budgets; zero and overflow handling remain unchanged.
           globs:
             - "Source/MLX/Memory.swift"
             - "Source/MLX/AllocationFootprint.swift"
-        - title: "Process-global default streams"
+            - "Source/MLX/Memory+AllocationCap.swift"
+            - "ALLOCATION-CAP.md"
+            - "tools/check-process-allocation-cap.sh"
+        - title: "EvalProbe and serialized native evaluation"
           description: |
-            MLX 0.32 made the default stream's Metal command encoder thread-local, so any
-            `async/await` caller that built a graph on one thread and evaluated it on another
-            aborted with "There is no Stream(gpu, N) in current thread". `Stream.gpu` /
-            `Stream.cpu` now return one process-global stream per device created through the
-            fork's `mlx_thread_unsafe_*_stream_new`, whose encoder lives in the global map.
-          globs:
-            - "Source/MLX/Stream.swift"
-            - "Source/MLX/Device.swift"
-        - title: "Ops: convolve same mode with an even kernel"
-          description: |
-            `convolve(_:_:mode:)` with `.same` padded the right side of the input with
-            `padLeft / 2 - 1` values for an even kernel. A kernel of size 4 or more gave one value
-            too few. It now pads with `padLeft - 1`, as Python MLX does, so the output has
-            max(len(a), len(b)) values, as in numpy. `ConvolveSameModeTests` covers it.
-          globs:
-            - "Source/MLX/Ops.swift"
-        - title: "EvalProbe and eval-lock ordering"
-          description: |
-            `EvalProbe` is measurement-only instrumentation bracketing the blocking `mlx_eval`
-            inside `evalLock`: writes happen under the lock (recursion-safe via a depth counter),
-            reads are lock-free, so a provider can report "the current eval has been running
-            11 s" — the first-token wedge smoking gun — even while a wedged eval holds the lock
-            forever. `Transforms+Compile` fixes a compiled-function lock-order inversion found
-            during verification, and `MLXArray.description` is wrapped in `evalLock`.
+            `EvalProbe` is measurement-only instrumentation of the free `eval`. It brackets
+            the schedule under `evalLock` and the wait after it, so a provider can report
+            "the current eval has been running 11 s", which identifies a first-token wedge.
+            Array reads reach the same bracket through `MLXArray.eval()`. The probe state has
+            its own short lock, and readers never take `evalLock`. The `Execution` SPI
+            `withSerializedEvaluation` runs a body under `evalLock`, so status-checking native
+            evaluation and fences cannot commit the global Metal command buffer during a
+            model evaluation. Upstream fixed the compiled-function lock order itself, so the
+            fork no longer changes the lock order in `Transforms+Compile.swift`.
           globs:
             - "Source/MLX/EvalProbe.swift"
             - "Source/MLX/Transforms+Eval.swift"
-            - "Source/MLX/Transforms+Compile.swift"
-            - "Source/MLX/MLXArray.swift"
-        - title: "Ops: median over all axes"
+            - "Tests/MLXTests/NativeEvaluationSerializationTests.swift"
+        - title: "Compile: key each trace by the task's default stream"
           description: |
-            `median(_:keepDims:)` passed no axes to `mlx_median`, and MLX raised an error for every
-            array with 1 or more dimensions (a 0-dimensional array worked). It now passes all the
-            axes, as Python `mx.median(a)` does. `MedianAllAxesTests` covers it.
+            MLX keys a cached compiled trace by the C++ thread default stream. mlx-swift
+            scopes the default device and stream to the task (`Device.withDefaultDevice`,
+            `Stream.withNewDefaultStream`) and does not change the C++ default. A trace that
+            a thread recorded in a CPU scope was therefore replayed when the same thread later
+            called the function in a GPU scope, and the GPU call ran on the CPU. The same
+            applied between two GPU streams. `CompiledFunction` now passes the task default
+            stream (device type, device index, stream index) as the `constants` of
+            `mlx_detail_compile`, so each stream gets its own trace. Every `compile` overload
+            and the compiled MLXNN activations go through `CompiledFunction`, so this one
+            change covers all of them. `CompileStreamKeyTests` covers it. The upstream code
+            has the same defect.
           globs:
-            - "Source/MLX/Ops.swift"
+            - "Source/MLX/Transforms+Compile.swift"
         - title: "GPU diagnostics: Gemma 4 expert-QMM route counters"
           description: |
             `GPU.Gemma4ExpertQMMDiagnostics` with snapshot / reset / arm / disarm wraps the fork's
@@ -209,46 +231,35 @@ def:
             `nn.Softmax` does. `SoftMax` now uses the last axis too. `SoftMaxAxisTests` covers it.
           globs:
             - "Source/MLXNN/Activations.swift"
-        - title: "Transformer: finite causal mask"
-          description: |
-            `MultiHeadAttention.createAdditiveCausalMask` multiplied the mask by -1e9 in the
-            mask's own dtype. In float16, -1e9 is -inf, and 0 * -inf is NaN, so each allowed
-            position held NaN. The mask now uses the smallest finite value of the dtype, as
-            upstream MLX does, so allowed positions are 0. `TransformerCausalMaskTests` covers it.
-          globs:
-            - "Source/MLXNN/Transformer.swift"
-        - title: "Custom Metal kernels: mutable inputs"
+        - title: "Custom Metal kernels: mutable inputs and explicit math modes"
           description: |
             Swift custom Metal kernels take a default-empty `mutableInputs` list, forwarded
             through the C API, declaring Metal write access on owned input buffers and
             forbidding implicit contiguous copies of them (needed by the Nemotron kernels).
+            `MLXFast.KernelMathMode` adds an explicit per-kernel safe, relaxed or fast
+            compiler mode. The default remains safe and retains the legacy constructors;
+            non-safe modes use the new C options entry point and need numerical qualification.
+            Both the MLX and compatibility MLXFast APIs retain mutable-input semantics.
           globs:
             - "Source/MLX/MLXFastKernel.swift"
             - "Source/MLXFast/MLXFastKernel.swift"
-        - title: "DType: finfo for complex64 and bfloat16"
+        - title: "Ops: gatherQuantizedMM global scale"
           description: |
-            `DType.finfo` gave complex64 the float64 limits. MLX gives complex64 the limits of
-            its float32 parts, and so does this fork now. The bfloat16 `smallestSubnormal` was the
-            smallest normal (2^-126); it is now 2^-133, the smallest positive value with a leading
-            0 bit in the mantissa, as the doc comment says. `DTypeFInfoTests` covers it.
+            The pinned `mlx-c` adds a `global_scale` argument to `mlx_gather_qmm` (upstream
+            `mlx-c` 0.32.4). `gatherQuantizedMM` passes it through as an optional
+            `globalScale` parameter, which NVFP4 uses. The default is `nil`, so existing
+            callers do not change.
           globs:
-            - "Source/MLX/DType.swift"
-        - title: "Upstream API drift absorbed"
+            - "Source/MLX/Ops.swift"
+            - "Source/MLX/Documentation.docc/Organization/arithmetic.md"
+        - title: "Ops: nanToNum defaults for float64 and complex64"
           description: |
-            `FFT` gains the `FFTNorm` parameter and `IO` follows the load/save signatures of
-            the regenerated MLX-C bindings.
-          globs:
-            - "Source/MLX/FFT.swift"
-            - "Source/MLX/IO.swift"
-        - title: "Ops: nanToNum defaults"
-          description: |
-            `nanToNum` gave `posInf` and `negInf` a default of 0, so infinities became 0. The doc
-            comment and Python `mx.nan_to_num` use the largest finite value of the dtype. The
-            defaults are now `nil`, which gives that value. The C++ default supports only
-            float32, float16 and bfloat16 and throws for other types, so for `float64` and
-            `complex64` the Swift function passes the largest finite `Float` explicitly. The
-            values are `Float`, so for `float64` the default is 3.4028235e38, not the largest
-            finite `Double`. `NanToNumDefaultsTests` covers float32, float64 and complex64.
+            Upstream now gives `posInf` and `negInf` a default of `nil`, which gives the largest
+            finite value of the dtype. The C++ default supports only float32, float16 and
+            bfloat16 and throws for other types. So for `float64` and `complex64` the Swift
+            function passes the largest finite `Float` explicitly. The values are `Float`, so for
+            `float64` the default is 3.4028235e38, not the largest finite `Double`.
+            `NanToNumDefaultsTests` covers float32, float64 and complex64.
           globs:
             - "Source/MLX/Ops.swift"
         - title: "Transformer: post-norm decoder cross-attention queries"
@@ -259,6 +270,19 @@ def:
             `TransformerDecoderLayerTests` covers it.
           globs:
             - "Source/MLXNN/Transformer.swift"
+        - title: "GPU: thread-scoped command-buffer commit limits"
+          description: |
+            `GPU.withCommandBufferLimits(_:_:)` (with `GPU.CommandBufferLimits`) wraps the fork's
+            `mlx_metal_set_thread_command_buffer_limits` (header
+            `Source/Cmlx/include/mlx/command_buffer_limits.h`): command buffers encoded on the
+            calling thread commit after the given operation count or megabytes of distinct
+            inputs instead of the device defaults, and the previous limits are restored on exit.
+            A caller can give single-token decode steps larger buffers, so the CPU encodes
+            further ahead of the GPU, while prefill keeps the defaults and their memory bound.
+            Partitioning work into command buffers does not change results.
+          globs:
+            - "Source/MLX/GPU+Metal.swift"
+            - "Source/Cmlx/include/mlx/command_buffer_limits.h"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:
@@ -282,10 +306,12 @@ def:
         `CustomFunctionTests`, `ConvolutionTransposedTests` and `CacheTests` cover custom
         functions with a custom VJP, the transposed convolution layers and the MLXNN cache, which
         had no tests.
-        `TransformerTests` and `RecurrentTests` cover the upstream Transformer, RNN, GRU and LSTM
+        `TransformerTests` and `RecurrentLayerTests` cover the upstream Transformer, RNN, GRU and LSTM
         layers, which had no tests, against references built from plain ops.
         `CompileOverloadsTests` covers the typed `compile` overloads, which had no tests: each
         compiled result must equal the uncompiled result, and a second call must not trace again.
+        `CompileStreamKeyTests` calls one compiled function first in a CPU scope and then on the
+        GPU from the same thread. The GPU call must equal GPU eager evaluation bitwise.
       globs:
         - "Tests/MLXTests/*.swift"
     - title: "Fork tooling"
@@ -294,11 +320,29 @@ def:
         is not the merge-base with upstream, or when a file the fork changes is not described
         by a section above. `build-metallib.sh` builds the full MLX Metal library for the
         fork's test run in CI, because a SwiftPM command-line build compiles no Metal kernels.
+        Its `build` and `install` modes let CI build the library in its own job, cache it by
+        the `mlx` pin, and copy it into the test bundles of each test shard.
+        `check-generated-metal-sources.py` checks copied Metal headers and complete declared
+        JIT sections against current nested core, with exact wrappers and source-hash receipts.
+        Its default gate covers affine and FP quantized kernels, including NAX. `--all` audits the broader
+        Metal tree and reports existing drift; it does not claim every generated source is
+        current. Static section reconstruction does not replace compiler include discovery,
+        full regeneration, or binary qualification. Mutation self-tests verify stale copied
+        and expanded bodies fail. This gate does not regenerate files.
+        CI coverage locates the MLX test-target bundle emitted by SwiftBuild or
+        the combined package-test bundle emitted by native SwiftPM, and refuses
+        a missing executable or profile before reporting instrumented Swift code.
+        CONTRIBUTING.md documents the full-FP32 test contract and the required
+        fresh-process allocation-cap check, distinct from the ordinary test pass.
       globs:
         - "scripts/check_forkdiff.py"
+        - "scripts/check-generated-metal-sources.py"
+        - "scripts/test-check-generated-metal-sources.py"
         - "scripts/build-metallib.sh"
         - "FORKDIFF.md"
+        - "CONTRIBUTING.md"
         - "README.md"
+
 
 # ignored globally, does not count towards line count
 ignore:

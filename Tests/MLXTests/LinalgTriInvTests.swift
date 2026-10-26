@@ -9,7 +9,6 @@ import XCTest
 class LinalgTriInvTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     func testFreeTriInvUpper() {

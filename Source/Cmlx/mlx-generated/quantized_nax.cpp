@@ -31,7 +31,7 @@ MLX_MTL_CONST int SIMD_SIZE = 32;
 MLX_MTL_CONST int QUAD_SIZE = 4;
 
 template <int bits, int wsize = 8>
-inline constexpr short get_pack_factor() {
+inline constexpr short get_affine_pack_factor() {
   return (bits == 3 || bits == 5) ? 8 : (bits == 6 ? 4 : wsize / bits);
 }
 
@@ -42,17 +42,32 @@ inline constexpr short get_bytes_per_pack() {
 }
 
 template <typename T, typename U, int values_per_thread, int bits>
-inline U load_vector(const device T* x, thread U* x_thread) {
+inline U nax_load_vector(const device T* x, thread U* x_thread) {
   static_assert(
-      bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
-          bits == 8,
-      "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
+      bits == 1 || bits == 2 || bits == 3 || bits == 4 || bits == 5 ||
+          bits == 6 || bits == 8,
+      "Template undefined for bits not in {1, 2, 3, 4, 5, 6, 8}");
 
   U sum = 0;
 
-  if (bits == 2) {
+  if (bits == 1) {
+    for (int i = 0; i < values_per_thread; i += 8) {
+      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3] + x[i + 4] + x[i + 5] +
+          x[i + 6] + x[i + 7];
+      x_thread[i] = x[i];
+      x_thread[i + 1] = x[i + 1] / 2.0f;
+      x_thread[i + 2] = x[i + 2] / 4.0f;
+      x_thread[i + 3] = x[i + 3] / 8.0f;
+      x_thread[i + 4] = x[i + 4] / 16.0f;
+      x_thread[i + 5] = x[i + 5] / 32.0f;
+      x_thread[i + 6] = x[i + 6] / 64.0f;
+      x_thread[i + 7] = x[i + 7] / 128.0f;
+    }
+  }
+
+  else if (bits == 2) {
     for (int i = 0; i < values_per_thread; i += 4) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]);
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 4.0f;
       x_thread[i + 2] = x[i + 2] / 16.0f;
@@ -62,8 +77,8 @@ inline U load_vector(const device T* x, thread U* x_thread) {
 
   else if (bits == 3) {
     for (int i = 0; i < values_per_thread; i += 8) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3] + x[i + 4] + x[i + 5] +
-          x[i + 6] + x[i + 7];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]) + U(x[i + 4]) +
+          U(x[i + 5]) + U(x[i + 6]) + U(x[i + 7]);
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 8.0f;
       x_thread[i + 2] = x[i + 2] / 64.0f;
@@ -77,7 +92,7 @@ inline U load_vector(const device T* x, thread U* x_thread) {
 
   else if (bits == 4) {
     for (int i = 0; i < values_per_thread; i += 4) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]);
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 16.0f;
       x_thread[i + 2] = x[i + 2] / 256.0f;
@@ -87,8 +102,8 @@ inline U load_vector(const device T* x, thread U* x_thread) {
 
   else if (bits == 5) {
     for (int i = 0; i < values_per_thread; i += 8) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3] + x[i + 4] + x[i + 5] +
-          x[i + 6] + x[i + 7];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]) + U(x[i + 4]) +
+          U(x[i + 5]) + U(x[i + 6]) + U(x[i + 7]);
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 32.0f;
       x_thread[i + 2] = x[i + 2] / 4.0f;
@@ -102,7 +117,7 @@ inline U load_vector(const device T* x, thread U* x_thread) {
 
   else if (bits == 6) {
     for (int i = 0; i < values_per_thread; i += 4) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]);
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 64.0f;
       x_thread[i + 2] = x[i + 2] / 16.0f;
@@ -121,17 +136,32 @@ inline U load_vector(const device T* x, thread U* x_thread) {
 }
 
 template <typename T, typename U, int values_per_thread, int bits>
-inline U load_vector_safe(const device T* x, thread U* x_thread, int N) {
+inline U nax_load_vector_safe(const device T* x, thread U* x_thread, int N) {
   static_assert(
-      bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
-          bits == 8,
-      "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
+      bits == 1 || bits == 2 || bits == 3 || bits == 4 || bits == 5 ||
+          bits == 6 || bits == 8,
+      "Template undefined for bits not in {1, 2, 3, 4, 5, 6, 8}");
 
   U sum = 0;
 
-  if (bits == 2) {
+  if (bits == 1) {
+    for (int i = 0; i < N; i += 8) {
+      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3] + x[i + 4] + x[i + 5] +
+          x[i + 6] + x[i + 7];
+      x_thread[i] = x[i];
+      x_thread[i + 1] = x[i + 1] / 2.0f;
+      x_thread[i + 2] = x[i + 2] / 4.0f;
+      x_thread[i + 3] = x[i + 3] / 8.0f;
+      x_thread[i + 4] = x[i + 4] / 16.0f;
+      x_thread[i + 5] = x[i + 5] / 32.0f;
+      x_thread[i + 6] = x[i + 6] / 64.0f;
+      x_thread[i + 7] = x[i + 7] / 128.0f;
+    }
+  }
+
+  else if (bits == 2) {
     for (int i = 0; i < N; i += 4) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]);
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 4.0f;
       x_thread[i + 2] = x[i + 2] / 16.0f;
@@ -141,8 +171,8 @@ inline U load_vector_safe(const device T* x, thread U* x_thread, int N) {
 
   else if (bits == 3) {
     for (int i = 0; i < N; i += 8) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3] + x[i + 4] + x[i + 5] +
-          x[i + 6] + x[i + 7];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]) + U(x[i + 4]) +
+          U(x[i + 5]) + U(x[i + 6]) + U(x[i + 7]);
 
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 8.0f;
@@ -157,7 +187,7 @@ inline U load_vector_safe(const device T* x, thread U* x_thread, int N) {
 
   else if (bits == 4) {
     for (int i = 0; i < N; i += 4) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]);
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 16.0f;
       x_thread[i + 2] = x[i + 2] / 256.0f;
@@ -167,8 +197,8 @@ inline U load_vector_safe(const device T* x, thread U* x_thread, int N) {
 
   else if (bits == 5) {
     for (int i = 0; i < N; i += 8) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3] + x[i + 4] + x[i + 5] +
-          x[i + 6] + x[i + 7];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]) + U(x[i + 4]) +
+          U(x[i + 5]) + U(x[i + 6]) + U(x[i + 7]);
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 32.0f;
       x_thread[i + 2] = x[i + 2] / 4.0f;
@@ -182,7 +212,7 @@ inline U load_vector_safe(const device T* x, thread U* x_thread, int N) {
 
   else if (bits == 6) {
     for (int i = 0; i < N; i += 4) {
-      sum += x[i] + x[i + 1] + x[i + 2] + x[i + 3];
+      sum += U(x[i]) + U(x[i + 1]) + U(x[i + 2]) + U(x[i + 3]);
       x_thread[i] = x[i];
       x_thread[i + 1] = x[i + 1] / 64.0f;
       x_thread[i + 2] = x[i + 2] / 16.0f;
@@ -212,13 +242,27 @@ inline U qdot(
     U bias,
     U sum) {
   static_assert(
-      bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
-          bits == 8,
-      "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
+      bits == 1 || bits == 2 || bits == 3 || bits == 4 || bits == 5 ||
+          bits == 6 || bits == 8,
+      "Template undefined for bits not in {1, 2, 3, 4, 5, 6, 8}");
 
   U accum = 0;
 
-  if (bits == 2) {
+  if (bits == 1) {
+    for (int i = 0; i < (values_per_thread / 8); i++) {
+      accum +=
+          (x_thread[8 * i] * (w[i] & 0x01) +
+           x_thread[8 * i + 1] * (w[i] & 0x02) +
+           x_thread[8 * i + 2] * (w[i] & 0x04) +
+           x_thread[8 * i + 3] * (w[i] & 0x08) +
+           x_thread[8 * i + 4] * (w[i] & 0x10) +
+           x_thread[8 * i + 5] * (w[i] & 0x20) +
+           x_thread[8 * i + 6] * (w[i] & 0x40) +
+           x_thread[8 * i + 7] * (w[i] & 0x80));
+    }
+  }
+
+  else if (bits == 2) {
     for (int i = 0; i < (values_per_thread / 4); i++) {
       accum +=
           (x_thread[4 * i] * (w[i] & 0x03) +
@@ -314,13 +358,27 @@ inline U qdot_safe(
     U sum,
     int N) {
   static_assert(
-      bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
-          bits == 8,
-      "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
+      bits == 1 || bits == 2 || bits == 3 || bits == 4 || bits == 5 ||
+          bits == 6 || bits == 8,
+      "Template undefined for bits not in {1, 2, 3, 4, 5, 6, 8}");
 
   U accum = 0;
 
-  if (bits == 2) {
+  if (bits == 1) {
+    for (int i = 0; i < (N / 8); i++) {
+      accum +=
+          (x_thread[8 * i] * (w[i] & 0x01) +
+           x_thread[8 * i + 1] * (w[i] & 0x02) +
+           x_thread[8 * i + 2] * (w[i] & 0x04) +
+           x_thread[8 * i + 3] * (w[i] & 0x08) +
+           x_thread[8 * i + 4] * (w[i] & 0x10) +
+           x_thread[8 * i + 5] * (w[i] & 0x20) +
+           x_thread[8 * i + 6] * (w[i] & 0x40) +
+           x_thread[8 * i + 7] * (w[i] & 0x80));
+    }
+  }
+
+  else if (bits == 2) {
     for (int i = 0; i < (N / 4); i++) {
       accum +=
           (x_thread[4 * i] * (w[i] & 0x03) +
@@ -411,11 +469,33 @@ template <typename U, int values_per_thread, int bits>
 inline void
 qouter(const thread uint8_t* w, U x, U scale, U bias, thread U* result) {
   static_assert(
-      bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
-          bits == 8,
-      "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
+      bits == 1 || bits == 2 || bits == 3 || bits == 4 || bits == 5 ||
+          bits == 6 || bits == 8,
+      "Template undefined for bits not in {1, 2, 3, 4, 5, 6, 8}");
 
-  if (bits == 2) {
+  if (bits == 1) {
+    U s[8] = {
+        scale,
+        scale / 2.0f,
+        scale / 4.0f,
+        scale / 8.0f,
+        scale / 16.0f,
+        scale / 32.0f,
+        scale / 64.0f,
+        scale / 128.0f};
+    for (int i = 0; i < (values_per_thread / 8); i++) {
+      result[8 * i] += x * (s[0] * (w[i] & 0x01) + bias);
+      result[8 * i + 1] += x * (s[1] * (w[i] & 0x02) + bias);
+      result[8 * i + 2] += x * (s[2] * (w[i] & 0x04) + bias);
+      result[8 * i + 3] += x * (s[3] * (w[i] & 0x08) + bias);
+      result[8 * i + 4] += x * (s[4] * (w[i] & 0x10) + bias);
+      result[8 * i + 5] += x * (s[5] * (w[i] & 0x20) + bias);
+      result[8 * i + 6] += x * (s[6] * (w[i] & 0x40) + bias);
+      result[8 * i + 7] += x * (s[7] * (w[i] & 0x80) + bias);
+    }
+  }
+
+  else if (bits == 2) {
     U s[4] = {scale, scale / 4.0f, scale / 16.0f, scale / 64.0f};
     for (int i = 0; i < (values_per_thread / 4); i++) {
       result[4 * i] += x * (s[0] * (w[i] & 0x03) + bias);
@@ -496,18 +576,44 @@ qouter(const thread uint8_t* w, U x, U scale, U bias, thread U* result) {
   }
 }
 
-template <typename U, int N, int bits>
-inline void
-dequantize(const device uint8_t* w, U scale, U bias, threadgroup U* w_local) {
+template <
+    typename U,
+    int N,
+    int bits,
+    typename BytePtr = const device uint8_t*,
+    typename OutPtr = threadgroup U*>
+inline void dequantize(BytePtr w, U scale, U bias, OutPtr w_local) {
   static_assert(
-      bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
-          bits == 8,
-      "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
+      bits == 1 || bits == 2 || bits == 3 || bits == 4 || bits == 5 ||
+          bits == 6 || bits == 8,
+      "Template undefined for bits not in {1, 2, 3, 4, 5, 6, 8}");
 
   const float s = float(scale);
   const float b = float(bias);
 
-  if (bits == 2) {
+  if (bits == 1) {
+    float sc[8] = {
+        s,
+        s / 2.0f,
+        s / 4.0f,
+        s / 8.0f,
+        s / 16.0f,
+        s / 32.0f,
+        s / 64.0f,
+        s / 128.0f};
+    for (int i = 0; i < (N / 8); i++) {
+      w_local[8 * i] = static_cast<U>(sc[0] * (w[i] & 0x01) + b);
+      w_local[8 * i + 1] = static_cast<U>(sc[1] * (w[i] & 0x02) + b);
+      w_local[8 * i + 2] = static_cast<U>(sc[2] * (w[i] & 0x04) + b);
+      w_local[8 * i + 3] = static_cast<U>(sc[3] * (w[i] & 0x08) + b);
+      w_local[8 * i + 4] = static_cast<U>(sc[4] * (w[i] & 0x10) + b);
+      w_local[8 * i + 5] = static_cast<U>(sc[5] * (w[i] & 0x20) + b);
+      w_local[8 * i + 6] = static_cast<U>(sc[6] * (w[i] & 0x40) + b);
+      w_local[8 * i + 7] = static_cast<U>(sc[7] * (w[i] & 0x80) + b);
+    }
+  }
+
+  else if (bits == 2) {
     float sc[4] = {s, s / 4.0f, s / 16.0f, s / 64.0f};
     for (int i = 0; i < (N / 4); i++) {
       w_local[4 * i] = static_cast<U>(sc[0] * (w[i] & 0x03) + b);
@@ -592,7 +698,7 @@ template <
     short tgp_size,
     short group_size,
     short bits>
-struct QuantizedBlockLoader {
+struct AffineQuantizedNAXBlockLoader {
   static_assert(
       BCOLS <= group_size,
       "The group size should be larger than the columns");
@@ -600,11 +706,11 @@ struct QuantizedBlockLoader {
       group_size % BCOLS == 0,
       "The group size should be divisible by the columns");
   static_assert(
-      bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
-          bits == 8,
-      "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
+      bits == 1 || bits == 2 || bits == 3 || bits == 4 || bits == 5 ||
+          bits == 6 || bits == 8,
+      "Template undefined for bits not in {1, 2, 3, 4, 5, 6, 8}");
 
-  MLX_MTL_CONST short pack_factor = get_pack_factor<bits, 8>();
+  MLX_MTL_CONST short pack_factor = get_affine_pack_factor<bits, 8>();
   MLX_MTL_CONST short bytes_per_pack = get_bytes_per_pack<bits>();
   MLX_MTL_CONST short BCOLS_PACKED = BCOLS / pack_factor;
   MLX_MTL_CONST short n_reads =
@@ -625,7 +731,7 @@ struct QuantizedBlockLoader {
   const device T* scales;
   const device T* biases;
 
-  QuantizedBlockLoader(
+  AffineQuantizedNAXBlockLoader(
       const device uint8_t* src_,
       const device T* scales_,
       const device T* biases_,
@@ -666,14 +772,7 @@ struct QuantizedBlockLoader {
       return;
     }
 
-    if (reduction_dim == 1 && bi >= src_tile_dim.x) {
-      for (int i = 0; i < n_reads * pack_factor; i++) {
-        dst[i] = T(0);
-      }
-      return;
-    }
-
-    if (reduction_dim == 0 && bi >= src_tile_dim.y) {
+    if (bi >= src_tile_dim.y || bj * pack_factor >= src_tile_dim.x) {
       for (int i = 0; i < n_reads * pack_factor; i++) {
         dst[i] = T(0);
       }
@@ -683,11 +782,17 @@ struct QuantizedBlockLoader {
     T scale = *scales;
     T bias = *biases;
     for (int i = 0; i < n_reads; i++) {
-      dequantize<T, pack_factor, bits>(
-          (device uint8_t*)(src + i * bytes_per_pack),
-          scale,
-          bias,
-          dst + i * pack_factor);
+      if ((bj + i) * pack_factor < src_tile_dim.x) {
+        dequantize<T, pack_factor, bits>(
+            (device uint8_t*)(src + i * bytes_per_pack),
+            scale,
+            bias,
+            dst + i * pack_factor);
+      } else {
+        for (int p = 0; p < pack_factor; p++) {
+          dst[i * pack_factor + p] = T(0);
+        }
+      }
     }
   }
 
@@ -720,7 +825,7 @@ template <
     short reduction_dim,
     short tgp_size,
     short bits>
-struct QuantizedBlockLoader<
+struct AffineQuantizedNAXBlockLoader<
     T,
     BROWS,
     BCOLS,
@@ -735,11 +840,11 @@ struct QuantizedBlockLoader<
       BCOLS % group_size == 0,
       "The group size should be divisible by the columns");
   static_assert(
-      bits == 2 || bits == 3 || bits == 4 || bits == 5 || bits == 6 ||
-          bits == 8,
-      "Template undefined for bits not in {2, 3, 4, 5, 6, 8}");
+      bits == 1 || bits == 2 || bits == 3 || bits == 4 || bits == 5 ||
+          bits == 6 || bits == 8,
+      "Template undefined for bits not in {1, 2, 3, 4, 5, 6, 8}");
 
-  MLX_MTL_CONST short pack_factor = get_pack_factor<bits, 8>();
+  MLX_MTL_CONST short pack_factor = get_affine_pack_factor<bits, 8>();
   MLX_MTL_CONST short bytes_per_pack = get_bytes_per_pack<bits>();
   MLX_MTL_CONST short BCOLS_PACKED = BCOLS / pack_factor;
   MLX_MTL_CONST short n_reads =
@@ -765,7 +870,7 @@ struct QuantizedBlockLoader<
   const device T* scales;
   const device T* biases;
 
-  QuantizedBlockLoader(
+  AffineQuantizedNAXBlockLoader(
       const device uint8_t* src_,
       const device T* scales_,
       const device T* biases_,
@@ -806,14 +911,7 @@ struct QuantizedBlockLoader<
       return;
     }
 
-    if (reduction_dim == 1 && bi >= src_tile_dim.x) {
-      for (int i = 0; i < n_reads * pack_factor; i++) {
-        dst[i] = T(0);
-      }
-      return;
-    }
-
-    if (reduction_dim == 0 && bi >= src_tile_dim.y) {
+    if (bi >= src_tile_dim.y || bj * pack_factor >= src_tile_dim.x) {
       for (int i = 0; i < n_reads * pack_factor; i++) {
         dst[i] = T(0);
       }
@@ -823,11 +921,17 @@ struct QuantizedBlockLoader<
     T scale = *scales;
     T bias = *biases;
     for (int i = 0; i < n_reads; i++) {
-      dequantize<T, pack_factor, bits>(
-          (device uint8_t*)(src + i * bytes_per_pack),
-          scale,
-          bias,
-          dst + i * pack_factor);
+      if ((bj + i) * pack_factor < src_tile_dim.x) {
+        dequantize<T, pack_factor, bits>(
+            (device uint8_t*)(src + i * bytes_per_pack),
+            scale,
+            bias,
+            dst + i * pack_factor);
+      } else {
+        for (int p = 0; p < pack_factor; p++) {
+          dst[i * pack_factor + p] = T(0);
+        }
+      }
     }
   }
 
@@ -945,26 +1049,292 @@ METAL_FUNC void adjust_matrix_offsets(
   y += tid.z * output_stride;
 }
 
+// AffineQuantizedNAXBlockLoader's thread mapping split into two steps: fetch()
+// reads the packed words and the group's scale and bias for one BK step into
+// registers, store() dequantizes them into threadgroup memory. Fetching step
+// k + 1 before the MMAs of step k hides the device reads behind the matrix
+// work.
 template <
     typename T,
-    const int group_size,
-    const int bits,
-    const bool aligned_N,
-    const int BM = 64,
-    const int BK = 64,
-    const int BN = 64,
-    const int WM = 2,
-    const int WN = 2>
+    short BROWS,
+    short BCOLS,
+    short dst_ld,
+    short tgp_size,
+    short group_size,
+    short bits>
+struct QuantizedBlockLoaderStaged {
+  MLX_MTL_CONST short pack_factor = get_affine_pack_factor<bits, 8>();
+  MLX_MTL_CONST short bytes_per_pack = get_bytes_per_pack<bits>();
+  MLX_MTL_CONST short BCOLS_PACKED = BCOLS / pack_factor;
+  MLX_MTL_CONST short n_reads = (BCOLS_PACKED * BROWS) / tgp_size;
+  MLX_MTL_CONST short n_words = n_reads * bytes_per_pack / 4;
+
+  static_assert(
+      BCOLS_PACKED * BROWS >= tgp_size &&
+          n_words * 4 == n_reads * bytes_per_pack,
+      "Every thread loads whole words");
+  static_assert(
+      n_reads * pack_factor <= group_size && n_reads * pack_factor <= BCOLS,
+      "A thread's values must lie in one row and quantization group");
+
+  const short thread_idx;
+  const short bi;
+  const short bj;
+  const device uint8_t* src;
+  const device T* scales;
+  const device T* biases;
+  uint32_t raw[n_words];
+  T scale;
+  T bias;
+
+  QuantizedBlockLoaderStaged(
+      const device uint8_t* src_,
+      const device T* scales_,
+      const device T* biases_,
+      const int src_ld,
+      ushort simd_group_id,
+      ushort simd_lane_id) thread
+      : thread_idx(simd_group_id * 32 + simd_lane_id),
+        bi(n_reads* thread_idx / BCOLS_PACKED),
+        bj((n_reads * thread_idx) % BCOLS_PACKED),
+        src(src_ + bi * src_ld * bytes_per_pack / pack_factor +
+            bj * bytes_per_pack),
+        scales(scales_ + bi * src_ld / group_size),
+        biases(biases_ + bi * src_ld / group_size) {}
+
+  // k: first column of the step
+  void fetch(const int k) thread {
+    auto p = (const device uint32_t*)(src + k * bytes_per_pack / pack_factor);
+    STEEL_PRAGMA_UNROLL
+    for (short i = 0; i < n_words; i++) {
+      raw[i] = p[i];
+    }
+    const int g = (k + bj * pack_factor) / group_size;
+    scale = scales[g];
+    bias = biases[g];
+  }
+
+  // Dequantize into registers, then write 8 values per store
+  void store(threadgroup T* dst) const thread {
+    constexpr short n_vals = n_reads * pack_factor;
+    static_assert(n_vals % 8 == 0, "8-value stores");
+    T v[n_vals];
+    // Unpack with shifts (constant indices keep it in registers)
+    uint8_t b[n_words * 4];
+    STEEL_PRAGMA_UNROLL
+    for (short i = 0; i < n_words * 4; i++) {
+      b[i] = uint8_t(raw[i / 4] >> (8 * (i % 4)));
+    }
+    STEEL_PRAGMA_UNROLL
+    for (short i = 0; i < n_reads; i++) {
+      dequantize<T, pack_factor, bits>(
+          b + i * bytes_per_pack, scale, bias, v + i * pack_factor);
+    }
+    dst += bi * dst_ld + bj * pack_factor;
+    STEEL_PRAGMA_UNROLL
+    for (short i = 0; i < n_vals; i += 8) {
+      *(threadgroup vec<T, 8>*)(dst + i) = *(thread vec<T, 8>*)(v + i);
+    }
+  }
+};
+
+// Each simdgroup computes SM rows and prefetches the next activation tile.
+// Weights use two threadgroup buffers with one barrier between K steps.
+template <
+    typename T,
+    int group_size,
+    int bits,
+    typename U = T,
+    int BM = 64,
+    int BK = 64,
+    int BN = 64,
+    int SM = 16>
+METAL_FUNC void qmm_t_nax_staged_impl(
+    const device uint32_t* w,
+    const device T* scales,
+    const device T* biases,
+    const device T* x,
+    device U* y,
+    threadgroup T* Ws,
+    const constant int& K,
+    const constant int& N,
+    const constant int& M,
+    const int k_end,
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint simd_gid [[simdgroup_index_in_threadgroup]],
+    uint simd_lid [[thread_index_in_simdgroup]]) {
+  static_assert(BK == 64 && BN == 64, "64-column tiles");
+  static_assert(SM > 0 && SM % 16 == 0 && BM % SM == 0, "Whole row fragments");
+  static_assert(
+      sizeof(T) == 2, "Two tiles fit threadgroup memory for 16-bit T");
+
+  constexpr int pack_factor = get_affine_pack_factor<bits, 8>();
+  constexpr int bytes_per_pack = get_bytes_per_pack<bits>();
+  constexpr int BK_padded = (BK + 16 / sizeof(T));
+  constexpr int tile_size = BN * BK_padded;
+
+  using loader_w_t = QuantizedBlockLoaderStaged<
+      T,
+      BN,
+      BK,
+      BK_padded,
+      (BM / SM) * SIMD_SIZE,
+      group_size,
+      bits>;
+  using frag_t = typename BaseNAXFrag::template dtype_frag_t<T>;
+
+  const int K_w = K * bytes_per_pack / pack_factor;
+  const int K_g = K / group_size;
+  const int y_row = tid.y * BM;
+  const int y_col = tid.x * BN;
+
+  loader_w_t loader_w(
+      (const device uint8_t*)w + y_col * K_w,
+      scales + y_col * K_g,
+      biases + y_col * K_g,
+      K,
+      simd_gid,
+      simd_lid);
+
+  // This simdgroup's rows and the two rows each thread holds in a fragment
+  const int tile_rows = min(BM, M - y_row);
+  constexpr int TM = SM / 16;
+  const int sm = SM * int(simd_gid);
+  const int rows = min(SM, tile_rows - sm);
+  const short2 sc = BaseNAXFrag::get_coord();
+  const device T* x0[TM];
+  const device T* x1[TM];
+  STEEL_PRAGMA_UNROLL
+  for (short m = 0; m < TM; m++) {
+    const int r0 = min(sm + m * 16 + int(sc.y), tile_rows - 1);
+    const int r1 = min(sm + m * 16 + int(sc.y) + 8, tile_rows - 1);
+    x0[m] = x + (y_row + r0) * static_cast<int64_t>(K) + sc.x;
+    x1[m] = x + (y_row + r1) * static_cast<int64_t>(K) + sc.x;
+  }
+
+  NAXTile<float, TM, BN / 16> Dtile;
+  Dtile.clear();
+  vec<T, 4> a_cur[BK / 16][TM][2];
+  vec<T, 4> a_next[BK / 16][TM][2];
+
+  loader_w.fetch(0);
+  loader_w.store(Ws);
+  if (rows > 0) {
+    STEEL_PRAGMA_UNROLL
+    for (short s = 0; s < BK / 16; s++) {
+      STEEL_PRAGMA_UNROLL
+      for (short m = 0; m < TM; m++) {
+        a_cur[s][m][0] = *(const device vec<T, 4>*)(x0[m] + s * 16);
+        a_cur[s][m][1] = *(const device vec<T, 4>*)(x1[m] + s * 16);
+      }
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (int k = 0, it = 0; k < k_end; k += BK, it++) {
+    const bool more = k + BK < k_end;
+    if (more) {
+      loader_w.fetch(k + BK);
+    }
+    if (rows > 0) {
+      const int kn = more ? k + BK : k;
+      STEEL_PRAGMA_UNROLL
+      for (short s = 0; s < BK / 16; s++) {
+        STEEL_PRAGMA_UNROLL
+        for (short m = 0; m < TM; m++) {
+          a_next[s][m][0] = *(const device vec<T, 4>*)(x0[m] + kn + s * 16);
+          a_next[s][m][1] = *(const device vec<T, 4>*)(x1[m] + kn + s * 16);
+        }
+      }
+      const threadgroup T* ws =
+          Ws + (it & 1) * tile_size + sc.y * BK_padded + sc.x;
+      STEEL_PRAGMA_UNROLL
+      for (short s = 0; s < BK / 16; s++) {
+        STEEL_PRAGMA_UNROLL
+        for (short j = 0; j < BN / 16; j += 2) {
+          const threadgroup T* p0 = ws + (j * 16) * BK_padded + s * 16;
+          const threadgroup T* p1 = p0 + 16 * BK_padded;
+          frag_t b0;
+          frag_t b1;
+          STEEL_PRAGMA_UNROLL
+          for (short h = 0; h < 2; h++) {
+            const vec<T, 4> u0 =
+                *(const threadgroup vec<T, 4>*)(p0 + h * 8 * BK_padded);
+            const vec<T, 4> u1 =
+                *(const threadgroup vec<T, 4>*)(p1 + h * 8 * BK_padded);
+            STEEL_PRAGMA_UNROLL
+            for (short c = 0; c < 4; c++) {
+              b0[h * 4 + c] = u0[c];
+              b1[h * 4 + c] = u1[c];
+            }
+          }
+          STEEL_PRAGMA_UNROLL
+          for (short m = 0; m < TM; m++) {
+            frag_t a;
+            STEEL_PRAGMA_UNROLL
+            for (short c = 0; c < 4; c++) {
+              a[c] = a_cur[s][m][0][c];
+              a[4 + c] = a_cur[s][m][1][c];
+            }
+            BaseNAXFrag::mma(
+                Dtile.frag_at(m, j),
+                Dtile.frag_at(m, j + 1),
+                a,
+                metal::bool_constant<false>{},
+                b0,
+                b1,
+                metal::bool_constant<true>{});
+          }
+        }
+      }
+      STEEL_PRAGMA_UNROLL
+      for (short s = 0; s < BK / 16; s++) {
+        STEEL_PRAGMA_UNROLL
+        for (short m = 0; m < TM; m++) {
+          a_cur[s][m][0] = a_next[s][m][0];
+          a_cur[s][m][1] = a_next[s][m][1];
+        }
+      }
+    }
+    if (more) {
+      loader_w.store(Ws + ((it + 1) & 1) * tile_size);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (rows <= 0) {
+    return;
+  }
+  y += (y_row + sm) * static_cast<int64_t>(N) + y_col;
+  if (rows == SM) {
+    Dtile.store(y, N);
+  } else {
+    Dtile.store_safe(y, N, short2(BN, rows));
+  }
+}
+
+template <
+    typename T,
+    int group_size,
+    int bits,
+    bool aligned_N,
+    typename U = T,
+    int BM = 64,
+    int BK = 64,
+    int BN = 64,
+    int WM = 2,
+    int WN = 2>
 METAL_FUNC void qmm_t_nax_tgp_impl(
     const device uint32_t* w,
     const device T* scales,
     const device T* biases,
     const device T* x,
-    device T* y,
+    device U* y,
     threadgroup T* Ws,
     const constant int& K,
     const constant int& N,
     const constant int& M,
+    const int k_end,
     uint3 tid [[threadgroup_position_in_grid]],
     uint lid [[thread_index_in_threadgroup]],
     uint simd_gid [[simdgroup_index_in_threadgroup]],
@@ -974,12 +1344,12 @@ METAL_FUNC void qmm_t_nax_tgp_impl(
 
   (void)lid;
 
-  constexpr int pack_factor = get_pack_factor<bits, 8>();
+  constexpr int pack_factor = get_affine_pack_factor<bits, 8>();
   constexpr int bytes_per_pack = get_bytes_per_pack<bits>();
 
   constexpr int BK_padded = (BK + 16 / sizeof(T));
 
-  using loader_w_t = QuantizedBlockLoader<
+  using loader_w_t = AffineQuantizedNAXBlockLoader<
       T,
       BN,
       BK,
@@ -1037,7 +1407,7 @@ METAL_FUNC void qmm_t_nax_tgp_impl(
 
   dispatch_bool(!is_unaligned_sm, [&](auto kAlignedM) {
     dispatch_bool(aligned_N || !is_unaligned_bn, [&](auto kAlignedN) {
-      for (int k = 0; k < K; k += BK) {
+      for (int k = 0; k < k_end; k += BK) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
         if constexpr (kAlignedN.value) {
           loader_w.load_unsafe();
@@ -1118,12 +1488,12 @@ METAL_FUNC void qmm_n_nax_tgp_impl(
   static_assert(BK >= SIMD_SIZE, "BK should be larger than SIMD_SIZE");
   static_assert(BK % SIMD_SIZE == 0, "BK should be divisible by SIMD_SIZE");
 
-  constexpr int pack_factor = get_pack_factor<bits, 8>();
+  constexpr int pack_factor = get_affine_pack_factor<bits, 8>();
   constexpr int bytes_per_pack = get_bytes_per_pack<bits>();
 
   constexpr int BN_padded = (BN + 16 / sizeof(T));
 
-  using loader_w_t = QuantizedBlockLoader<
+  using loader_w_t = AffineQuantizedNAXBlockLoader<
       T,
       BK,
       BN,
@@ -1228,7 +1598,8 @@ template <
     const int BK = 32,
     const int BN = 64,
     const int WM = 2,
-    const int WN = 2>
+    const int WN = 2,
+    const bool has_global_scale = false>
 [[kernel]] void affine_qmm_t_nax(
     const device uint32_t* w [[buffer(0)]],
     const device T* scales [[buffer(1)]],
@@ -1254,7 +1625,8 @@ template <
 
   constexpr int BK_padded = (BK + 16 / sizeof(T));
 
-  threadgroup T Ws[BN * BK_padded];
+  // WN == 1 selects the staged impl
+  threadgroup T Ws[(WN == 1 ? 2 : 1) * BN * BK_padded];
 
   if (batched) {
     adjust_matrix_offsets<T>(
@@ -1274,8 +1646,98 @@ template <
         b_strides,
         tid);
   }
-  qmm_t_nax_tgp_impl<T, group_size, bits, aligned_N, BM, BK, BN, WM, WN>(
-      w, scales, biases, x, y, Ws, K, N, M, tid, lid, simd_gid, simd_lid);
+  if constexpr (WN == 1) {
+    static_assert(aligned_N, "Aligned output columns");
+    qmm_t_nax_staged_impl<T, group_size, bits, T, BM, BK, BN, BM / WM>(
+        w, scales, biases, x, y, Ws, K, N, M, K, tid, simd_gid, simd_lid);
+  } else {
+    qmm_t_nax_tgp_impl<T, group_size, bits, aligned_N, T, BM, BK, BN, WM, WN>(
+        w, scales, biases, x, y, Ws, K, N, M, K, tid, lid, simd_gid, simd_lid);
+  }
+}
+
+template <
+    typename T,
+    int group_size,
+    int bits,
+    bool aligned_N,
+    int BM = 64,
+    int BK = 64,
+    int BN = 64,
+    int WM = 2,
+    int WN = 2>
+[[kernel]] void affine_qmm_t_nax_splitk(
+    const device uint32_t* w [[buffer(0)]],
+    const device T* scales [[buffer(1)]],
+    const device T* biases [[buffer(2)]],
+    const device T* x [[buffer(3)]],
+    device float* y [[buffer(4)]],
+    const constant int& K [[buffer(5)]],
+    const constant int& N [[buffer(6)]],
+    const constant int& M [[buffer(7)]],
+    const constant int& k_partition_size [[buffer(8)]],
+    const constant int& split_k_partition_stride [[buffer(9)]],
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint lid [[thread_index_in_threadgroup]],
+    uint simd_gid [[simdgroup_index_in_threadgroup]],
+    uint simd_lid [[thread_index_in_simdgroup]]) {
+  constexpr int BK_padded = (BK + 16 / sizeof(T));
+  constexpr int pack_factor = get_affine_pack_factor<bits, 8>();
+  constexpr int bytes_per_pack = get_bytes_per_pack<bits>();
+
+  threadgroup T Ws[(WN == 1 ? 2 : 1) * BN * BK_padded];
+
+  const int k_start = tid.z * k_partition_size;
+  x += k_start;
+  auto wl = (const device uint8_t*)w;
+  wl += k_start * bytes_per_pack / pack_factor;
+  scales += k_start / group_size;
+  biases += k_start / group_size;
+  y += tid.z * static_cast<int64_t>(split_k_partition_stride);
+
+  if constexpr (WN == 1) {
+    static_assert(aligned_N, "Aligned output columns");
+    qmm_t_nax_staged_impl<T, group_size, bits, float, BM, BK, BN, BM / WM>(
+        (const device uint32_t*)wl,
+        scales,
+        biases,
+        x,
+        y,
+        Ws,
+        K,
+        N,
+        M,
+        k_partition_size,
+        tid,
+        simd_gid,
+        simd_lid);
+  } else {
+    qmm_t_nax_tgp_impl<
+        T,
+        group_size,
+        bits,
+        aligned_N,
+        float,
+        BM,
+        BK,
+        BN,
+        WM,
+        WN>(
+        (const device uint32_t*)wl,
+        scales,
+        biases,
+        x,
+        y,
+        Ws,
+        K,
+        N,
+        M,
+        k_partition_size,
+        tid,
+        lid,
+        simd_gid,
+        simd_lid);
+  }
 }
 
 template <
@@ -1347,7 +1809,8 @@ template <
     const int BK = 64,
     const int BN = 64,
     const int WM = 2,
-    const int WN = 2>
+    const int WN = 2,
+    const bool has_global_scale = false>
 [[kernel]] void affine_gather_qmm_t_nax(
     const device uint32_t* w [[buffer(0)]],
     const device T* scales [[buffer(1)]],
@@ -1403,8 +1866,8 @@ template <
       s_strides,
       b_strides,
       tid);
-  qmm_t_nax_tgp_impl<T, group_size, bits, aligned_N, BM, BK, BN, WM, WN>(
-      w, scales, biases, x, y, Ws, K, N, M, tid, lid, simd_gid, simd_lid);
+  qmm_t_nax_tgp_impl<T, group_size, bits, aligned_N, T, BM, BK, BN, WM, WN>(
+      w, scales, biases, x, y, Ws, K, N, M, K, tid, lid, simd_gid, simd_lid);
 }
 
 template <
@@ -1499,12 +1962,12 @@ template <
     uint3 tid [[threadgroup_position_in_grid]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]]) {
-  constexpr int pack_factor = get_pack_factor<bits, 8>();
+  constexpr int pack_factor = get_affine_pack_factor<bits, 8>();
   constexpr int bytes_per_pack = get_bytes_per_pack<bits>();
   constexpr int BK_padded = (BK + 16 / sizeof(T));
   constexpr int BN_padded = (BN + 16 / sizeof(T));
 
-  using loader_w_t = QuantizedBlockLoader<
+  using loader_w_t = AffineQuantizedNAXBlockLoader<
       T,
       transpose ? BN : BK,
       transpose ? BK : BN,
@@ -1574,8 +2037,6 @@ template <
 
   using AccumType = float;
 
-  const bool sg_active = sgp_sm > 0;
-
   NAXTile<AccumType, TM, TN> Dtile;
   Dtile.clear();
 
@@ -1606,33 +2067,31 @@ template <
 
         STEEL_PRAGMA_NO_UNROLL
         for (int kk1 = 0; kk1 < BK; kk1 += SK) {
-          if (sg_active) {
-            NAXTile<T, TM, TK> Atile;
-            NAXTile<T, BR, BC> Btile;
+          NAXTile<T, TM, TK> Atile;
+          NAXTile<T, BR, BC> Btile;
 
-            volatile int compiler_barrier;
+          volatile int compiler_barrier;
 
-            if constexpr (kAlignedM.value) {
-              Atile.load(xn + kk1, K);
-            } else {
-              Atile.load_safe(xn + kk1, K, short2(SK, sgp_sm));
-            }
-
-            if constexpr (transpose) {
-              Btile.template load<T, BK_padded, 1>(Ws + tn * BK_padded + kk1);
-            } else {
-              Btile.template load<T, BN_padded, 1>(Ws + tn + kk1 * BN_padded);
-            }
-
-            tile_matmad_nax(
-                Dtile,
-                Atile,
-                metal::bool_constant<false>{},
-                Btile,
-                metal::bool_constant<transpose>{});
-
-            (void)compiler_barrier;
+          if constexpr (kAlignedM.value) {
+            Atile.load(xn + kk1, K);
+          } else {
+            Atile.load_safe(xn + kk1, K, short2(SK, sgp_sm));
           }
+
+          if constexpr (transpose) {
+            Btile.template load<T, BK_padded, 1>(Ws + tn * BK_padded + kk1);
+          } else {
+            Btile.template load<T, BN_padded, 1>(Ws + tn + kk1 * BN_padded);
+          }
+
+          tile_matmad_nax(
+              Dtile,
+              Atile,
+              metal::bool_constant<false>{},
+              Btile,
+              metal::bool_constant<transpose>{});
+
+          (void)compiler_barrier;
         }
 
         xn += BK;
@@ -1646,30 +2105,28 @@ template <
 
         STEEL_PRAGMA_NO_UNROLL
         for (int kk1 = 0; kk1 < BK; kk1 += SK) {
-          if (sg_active) {
-            NAXTile<T, TM, TK> Atile;
-            NAXTile<T, BR, BC> Btile;
+          NAXTile<T, TM, TK> Atile;
+          NAXTile<T, BR, BC> Btile;
 
-            volatile int compiler_barrier;
+          volatile int compiler_barrier;
 
-            const short psk = min(int(SK), max(0, (BK - kk1)));
-            Atile.load_safe(xn + kk1, K, short2(psk, sgp_sm));
+          const short psk = min(int(SK), max(0, (k_remain - kk1)));
+          Atile.load_safe(xn + kk1, K, short2(psk, sgp_sm));
 
-            if constexpr (transpose) {
-              Btile.template load<T, BK_padded, 1>(Ws + tn * BK_padded + kk1);
-            } else {
-              Btile.template load<T, BN_padded, 1>(Ws + tn + kk1 * BN_padded);
-            }
-
-            tile_matmad_nax(
-                Dtile,
-                Atile,
-                metal::bool_constant<false>{},
-                Btile,
-                metal::bool_constant<transpose>{});
-
-            (void)compiler_barrier;
+          if constexpr (transpose) {
+            Btile.template load<T, BK_padded, 1>(Ws + tn * BK_padded + kk1);
+          } else {
+            Btile.template load<T, BN_padded, 1>(Ws + tn + kk1 * BN_padded);
           }
+
+          tile_matmad_nax(
+              Dtile,
+              Atile,
+              metal::bool_constant<false>{},
+              Btile,
+              metal::bool_constant<transpose>{});
+
+          (void)compiler_barrier;
         }
       }
 

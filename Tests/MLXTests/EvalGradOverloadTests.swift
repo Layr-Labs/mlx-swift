@@ -8,7 +8,6 @@ import XCTest
 class EvalGradOverloadTests: XCTestCase {
 
     override class func setUp() {
-        setDefaultDevice()
     }
 
     /// Lazy arrays: `base * k` for k in 1 ... count.

@@ -400,6 +400,9 @@ open class QuantizedLinear: Linear, Quantized {
     /// BF16 scales and biases that `callAsFunction` caches (one copy for
     /// both, made on the caller's stream) instead of a fresh widening inside
     /// every call.
+    ///
+    /// - Precondition: `x` is FP32 with two or more dimensions, and the layer
+    ///   uses `.affine` quantization. Other inputs stop the process.
     public func independentRowsForward(_ x: MLXArray) -> MLXArray {
         constantCachedForward(x, allowFloat16: false, independentRows: true)
     }

@@ -152,20 +152,26 @@ final class Float16ConstantCastTests: XCTestCase {
             }
         }
         XCTAssertEqual(layer.parameters().flattened().map(\.0).sorted(), names)
-        let input = MLXArray.ones([3, 1024], dtype: .float32)
+        // One row takes the singleton FP16-reuse path; three rows take the
+        // independent-rows path. Each mutation must invalidate both.
+        let inputs = [1, 3].map { MLXArray.ones([$0, 1024], dtype: .float32) }
         Parent(layer).update(
             parameters: ModuleParameters.unflattened([
                 ("child.scales", (layer.scales * 2).asType(.float16)),
                 ("child.bias", (layer.bias! + 1).asType(.float16)),
             ]))
-        XCTAssertEqual(
-            layer(input).asData(access: .copy).data,
-            reference(layer, input).asData(access: .copy).data)
+        for input in inputs {
+            XCTAssertEqual(
+                layer(input).asData(access: .copy).data,
+                reference(layer, input).asData(access: .copy).data)
+        }
         layer.scales._updateInternal((layer.scales * 3).asType(.float16))
         layer.biases![0, 0] = MLXArray(Float(2)).asType(.float16)
-        XCTAssertEqual(
-            layer(input).asData(access: .copy).data,
-            reference(layer, input).asData(access: .copy).data)
+        for input in inputs {
+            XCTAssertEqual(
+                layer(input).asData(access: .copy).data,
+                reference(layer, input).asData(access: .copy).data)
+        }
         XCTAssertEqual(layer.scales.dtype, .float16)
         XCTAssertEqual(layer.parameters().flattened().map(\.0).sorted(), names)
         XCTAssertTrue(layer.trainableParameters().flattened().isEmpty)
@@ -173,17 +179,22 @@ final class Float16ConstantCastTests: XCTestCase {
 
     func testPackedCompileStateReplacementAndIneligibleShapes() throws {
         let layer = try layer()
+        // One row takes the singleton FP16-reuse path; three rows take the
+        // independent-rows path.
+        let singleton = MLXArray.ones([1, 1024], dtype: .float32)
         let input = MLXArray.ones([3, 1024], dtype: .float32)
-        eval(layer(input))
+        eval(layer(singleton), layer(input))
         let compiled = compile(inputs: [layer]) { (x: MLXArray) in layer(x) }
         for multiplier in [Float(1), 2] {
             layer.update(
                 parameters: ModuleParameters.unflattened([
                     ("scales", (layer.scales * multiplier).asType(.float16))
                 ]))
-            XCTAssertEqual(
-                compiled(input).asData(access: .copy).data,
-                reference(layer, input).asData(access: .copy).data)
+            for x in [singleton, input] {
+                XCTAssertEqual(
+                    compiled(x).asData(access: .copy).data,
+                    reference(layer, x).asData(access: .copy).data)
+            }
         }
         for other in [
             try self.layer(bits: 4), try self.layer(group: 64), try self.layer(block: 128),

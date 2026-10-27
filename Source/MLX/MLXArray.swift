@@ -659,6 +659,13 @@ public class MLXArray: ExpressibleByArrayLiteral {
         return MLXArray(new)
     }
 
+    /// A new `MLXArray` object for the same array: no graph node, no data copy.
+    ///
+    /// This is what `self[.ellipsis]` returns (a full-range slice is the array
+    /// itself), without the indexing work. Assigning through the new object
+    /// (`new[...] = value`) leaves this one unchanged.
+    public func sharingArray() -> MLXArray { copyContext() }
+
     /// Used to apply update at given indices.
     ///
     /// An assignment through indices `array[indices]` will produce

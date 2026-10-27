@@ -49,16 +49,26 @@ def:
             `.gitmodules` points `Source/Cmlx/mlx` and `Source/Cmlx/mlx-c` at
             `Layr-Labs/mlx` / `Layr-Labs/mlx-c`; the gitlinks are advanced with each core change.
             The diff shown for the two submodule paths is the pointer change only.
-            On `main` both pins are merges of upstream `main` into the forks (2026-10-22):
+            The upstream sync of 2026-10-22 pinned merges of upstream `main` into the forks:
             `mlx` ff4bb35b (the head of Layr-Labs/mlx#43, the compile cache erase fix, based
             on Layr-Labs/mlx `main` with Layr-Labs/mlx#40, float16 and bfloat16 floor divide
-            in float32) and `mlx-c` 004c735f, whose CMake `GIT_TAG` names the same `mlx`
-            commit. The `mlx` pin keeps the core compiler-capacity retry for 512- and
-            1024-thread Metal groups. The `mlx-c` pin has the upstream C API that upstream
-            mlx-swift calls and the fork's own C API. The JACCL fixes layer pins the core
-            with Layr-Labs/mlx#33 merged into its `main`: the zeroed tail of each JACCL send
-            frame, the progress guard and the queue pairs on the advertised GID. It keeps
-            main's `mlx-c`.
+            in float32) and `mlx-c` 004c735f, whose CMake `GIT_TAG` names that `mlx` commit.
+            The JACCL fixes layer (#54) then moved `mlx` to 283017ce, with Layr-Labs/mlx#33
+            merged into its `main`, and kept `mlx-c` 004c735f. SwiftPM compiles the gitlinked
+            core, not the core that the `mlx-c` CMake `GIT_TAG` names; on this stack the two
+            differ. The `mlx` pin keeps the core compiler-capacity retry for 512- and
+            1024-thread Metal groups without changing kernel math or dispatch geometry. The
+            `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
+            own C API. The two-Mac cluster stack pins the cluster core and C with main
+            merged in: Layr-Labs/mlx#35 (with #33 under it) and Layr-Labs/mlx-c#15. Beyond
+            main they order the fast-synch GPU wait after every pending pass on its queue, carry
+            1 MiB JACCL frames, batch buffer retention, cache custom-kernel sources and
+            stream the sealed all-sum per AES-256-GCM piece over a two-rank JACCL exchange
+            (`mlx_distributed_set_streamed_seal_codec` in the vendored C header), offer
+            opt-in fused fence updates and fenced custom-kernel inputs, and cut host time
+            per custom-kernel launch and graph node. The page-backed footprint change is
+            reverted, as on the single-Mac stack, and the thread-scoped command-buffer
+            commit limits come from main.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"
@@ -161,6 +171,16 @@ def:
             - "Source/MLX/EvalProbe.swift"
             - "Source/MLX/Transforms+Eval.swift"
             - "Tests/MLXTests/NativeEvaluationSerializationTests.swift"
+        - title: "MLXArray: share an array without a graph node"
+          description: |
+            `MLXArray.sharingArray()` returns a new `MLXArray` object for the same array
+            (`copyContext()`): what `self[.ellipsis]` returns, because a full-range slice is
+            the array itself, but without the indexing work, a graph node or a data copy.
+            Assigning through the new object (`new[...] = value`) leaves the original
+            unchanged. The GLM-5.3-Flash text cache and MTP state in `mlx-swift-lm` use it to
+            clone and adopt cached arrays.
+          globs:
+            - "Source/MLX/MLXArray.swift"
         - title: "Compile: key each trace by the task's default stream"
           description: |
             MLX keys a cached compiled trace by the C++ thread default stream. mlx-swift
@@ -346,6 +366,16 @@ def:
         - "CONTRIBUTING.md"
         - "README.md"
 
+    - title: "Bounded JACCL startup-wait header contract"
+      description: |
+        The mirrored distributed_group.h exposes the matching C begin/end API
+        for one finite startup wait on an initialized group. Callers drain queued
+        work and serialize transitions; deadlines cannot renew or reopen failed
+        groups. The pinned core and C carry this API, and both gitlinks move
+        together when either one moves. The ordinary idle timeout,
+        allocation caps and authentication remain unchanged.
+      globs:
+        - "docs/startup-wait-budget.md"
 
 # ignored globally, does not count towards line count
 ignore:

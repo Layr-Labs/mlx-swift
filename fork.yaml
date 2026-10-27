@@ -60,7 +60,8 @@ def:
             1024-thread Metal groups without changing kernel math or dispatch geometry. The
             `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
             own C API. The two-Mac cluster stack pins the cluster core and C with main
-            merged in: Layr-Labs/mlx#41 (with #35 and #33 under it) and Layr-Labs/mlx-c#15.
+            merged in: `mlx` e637499f, the head of Layr-Labs/mlx#41 (with #35 and #33 under
+            it), and `mlx-c` 2ac897e3, the head of Layr-Labs/mlx-c#15.
             Beyond main they order the fast-synch GPU wait after every pending pass and earlier
             kernels in its current concurrent pass, make a GPU stream wait for another GPU stream
             on a shared event instead of spinning, keep helper ops on the caller's stream,
@@ -68,7 +69,11 @@ def:
             stream the sealed all-sum per AES-256-GCM piece over a two-rank JACCL exchange
             (`mlx_distributed_set_streamed_seal_codec` in the vendored C header), offer
             opt-in fused fence updates and fenced custom-kernel inputs, and cut host time
-            per custom-kernel launch and graph node. The page-backed footprint change is
+            per custom-kernel launch and graph node. The `mlx` pin also updates the fast fence
+            before the event fence, keeps fenced inputs in device memory and takes their waits
+            first, refuses a sealed frame larger than `INT_MAX`, shares the JACCL mesh failure
+            flag across wires and does the mesh `all_gather` offsets in 64 bits. The
+            page-backed footprint change is
             reverted, as on the single-Mac stack, and the thread-scoped command-buffer
             commit limits come from main.
           globs:

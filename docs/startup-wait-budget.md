@@ -9,7 +9,7 @@ ordinary idle policy. Invalid/null/unsupported/closed groups return failure via
 the installed C error handler. The caller retains hard cancellation and publishes
 READY only after successful end. Memory caps and authentication are unchanged.
 
-The mirrored header is byte-equal to the C startup-wait header. Both nested
-mode160000 dependency pins must advance to reviewed core/C successors together;
-this source preparation does not invent those not-yet-committed identities.
-Native compile, actual RDMA and GPU qualification remain separate requirements.
+The mirrored header is byte-equal to the C startup-wait header. The pinned core
+and C commits carry this API, and both gitlinks move together when either one
+moves. Native compile, actual RDMA and GPU qualification remain separate
+requirements.

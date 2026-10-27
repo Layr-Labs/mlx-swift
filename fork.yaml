@@ -49,11 +49,14 @@ def:
             `.gitmodules` points `Source/Cmlx/mlx` and `Source/Cmlx/mlx-c` at
             `Layr-Labs/mlx` / `Layr-Labs/mlx-c`; the gitlinks are advanced with each core change.
             The diff shown for the two submodule paths is the pointer change only.
-            On `main` both pins are merges of upstream `main` into the forks (2026-10-22):
+            The upstream sync of 2026-10-22 pinned merges of upstream `main` into the forks:
             `mlx` ff4bb35b (the head of Layr-Labs/mlx#43, the compile cache erase fix, based
             on Layr-Labs/mlx `main` with Layr-Labs/mlx#40, float16 and bfloat16 floor divide
-            in float32) and `mlx-c` 004c735f, whose CMake `GIT_TAG` names the same `mlx`
-            commit. The `mlx` pin keeps the core compiler-capacity retry for 512- and
+            in float32) and `mlx-c` 004c735f, whose CMake `GIT_TAG` names that `mlx` commit.
+            The JACCL fixes layer (#54) then moved `mlx` to 283017ce, with Layr-Labs/mlx#33
+            merged into its `main`, and kept `mlx-c` 004c735f. SwiftPM compiles the gitlinked
+            core, not the core that the `mlx-c` CMake `GIT_TAG` names; on this stack the two
+            differ. The `mlx` pin keeps the core compiler-capacity retry for 512- and
             1024-thread Metal groups without changing kernel math or dispatch geometry. The
             `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
             own C API. The two-Mac cluster stack pins the cluster core and C with main
@@ -368,8 +371,8 @@ def:
         The mirrored distributed_group.h exposes the matching C begin/end API
         for one finite startup wait on an initialized group. Callers drain queued
         work and serialize transitions; deadlines cannot renew or reopen failed
-        groups. Core and C gitlinks must advance together to the reviewed
-        successors before building a consumer. The ordinary idle timeout,
+        groups. The pinned core and C carry this API, and both gitlinks move
+        together when either one moves. The ordinary idle timeout,
         allocation caps and authentication remain unchanged.
       globs:
         - "docs/startup-wait-budget.md"

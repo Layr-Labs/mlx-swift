@@ -360,6 +360,9 @@ extension MLXFast {
         /// `MLX_FENCED_INPUT_WAIT(name);` for each fenced input before it reads it, at a
         /// point that every thread of the threadgroup reaches (it contains a threadgroup
         /// barrier). Without the variable the call does nothing and MLX waits as before.
+        /// MLX also waits as before on macOS earlier than 15 or iOS earlier than 18,
+        /// and while MLX traces for export. `MLX_METAL_FAST_SYNCH=1` needs a metallib built
+        /// at Metal 3.2 or newer: the SwiftPM `default.metallib` has no `fence` kernels.
         /// Synchronization only: the outputs do not change.
         public static func metalKernel(
             name: String, inputNames: some Sequence<String>, outputNames: some Sequence<String>,

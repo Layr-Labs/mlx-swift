@@ -60,13 +60,20 @@ def:
             1024-thread Metal groups without changing kernel math or dispatch geometry. The
             `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
             own C API. The two-Mac cluster stack pins the cluster core and C with main
-            merged in: Layr-Labs/mlx#35 (with #33 under it) and Layr-Labs/mlx-c#15. Beyond
-            main they order the fast-synch GPU wait after every pending pass on its queue, carry
-            1 MiB JACCL frames, batch buffer retention, cache custom-kernel sources and
+            merged in: `mlx` 72dffa2d, the head of Layr-Labs/mlx#41 (with #35 and #33 under
+            it), and `mlx-c` 2ac897e3, the head of Layr-Labs/mlx-c#15.
+            Beyond main they order the fast-synch GPU wait after every pending pass and earlier
+            kernels in its current concurrent pass, make a GPU stream wait for another GPU stream
+            on a shared event instead of spinning, keep helper ops on the caller's stream,
+            carry 1 MiB JACCL frames, batch buffer retention, cache custom-kernel sources and
             stream the sealed all-sum per AES-256-GCM piece over a two-rank JACCL exchange
             (`mlx_distributed_set_streamed_seal_codec` in the vendored C header), offer
             opt-in fused fence updates and fenced custom-kernel inputs, and cut host time
-            per custom-kernel launch and graph node. The page-backed footprint change is
+            per custom-kernel launch and graph node. The `mlx` pin also updates the fast fence
+            before the event fence, keeps fenced inputs in device memory and takes their waits
+            first, refuses a sealed frame larger than `INT_MAX`, shares the JACCL mesh failure
+            flag across wires and does the mesh `all_gather` offsets in 64 bits. The
+            page-backed footprint change is
             reverted, as on the single-Mac stack, and the thread-scoped command-buffer
             commit limits come from main.
           globs:
@@ -221,7 +228,12 @@ def:
             The default-on eligible Bonsai profile permits exact FP16→FP32
             widening reuse for eligible 2-bit/group128/block1024 Hadamard
             projections; explicit `DARKBLOOM_BONSAI_F16_CONSTANT_CACHE=0`
-            restores the prior path. Other callers retain the BF16-only contract.
+            turns that reuse off. It does not change which kernel a multi-row
+            call uses (see "Bonsai packed signed-Hadamard layers"). Other callers
+            retain the BF16-only contract.
+            `QuantizedLinear.independentRowsForward` runs affine FP32 rows through the
+            single-row kernel with the same cached constants, so batched rows no longer
+            widen them inside every quantized matmul.
           globs:
             - "Source/MLX/ConstantArrayCastCache.swift"
             - "Source/MLXNN/Quantized.swift"
@@ -244,6 +256,12 @@ def:
             published rotated checkpoint representation. Transforms use FP32
             intermediates and restore the incoming dtype; explicit signs and
             packed geometry are validated without unfolding or requantizing.
+            For FP32 input of more than one row, the 2-bit/group128/block1024
+            profile with FP16 scales sends each row through the single-row (M=1)
+            quantized kernel, so a multi-row call gives the bytes of separate
+            singleton calls and does not use the architecture-dependent TF32
+            matrix kernel. `DARKBLOOM_BONSAI_F16_CONSTANT_CACHE` does not change
+            this. `HadamardLayerTests` compares it with separate singleton calls.
             Adapted from PrismML-Eng/mlx-swift under its MIT attribution.
           globs:
             - "Source/MLXNN/Hadamard.swift"
@@ -303,6 +321,19 @@ def:
             A caller can give single-token decode steps larger buffers, so the CPU encodes
             further ahead of the GPU, while prefill keeps the defaults and their memory bound.
             Partitioning work into command buffers does not change results.
+          globs:
+            - "Source/MLX/GPU+Metal.swift"
+            - "Source/Cmlx/include/mlx/command_buffer_limits.h"
+        - title: "GPU: steel quantized-matmul tile"
+          description: |
+            `GPU.withQuantizedMatmulSteelTile(_:_:)` wraps the core's
+            `mlx_metal_set_thread_qmm_steel_tile` (header `Source/Cmlx/include/mlx/command_buffer_limits.h`):
+            the steel affine quantized matmul's output tile for the products the calling thread
+            encodes on a GPU without neural accelerators (32 x 32 as before, or another shape;
+            0 keeps the core's default: 64 x 32 for 16-bit and 32 x 64 for FP32 prompt-sized
+            products), restored on exit. The core's `tests/quantized_tile_tests.cpp`
+            (Layr-Labs/mlx) checks that every tile gives the 32 x 32 bytes. No Swift test calls
+            the wrapper.
           globs:
             - "Source/MLX/GPU+Metal.swift"
             - "Source/Cmlx/include/mlx/command_buffer_limits.h"

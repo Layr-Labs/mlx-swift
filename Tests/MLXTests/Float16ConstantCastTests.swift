@@ -1,35 +1,41 @@
 import Foundation
 @_spi(QuantizedConstantCache) import MLX
-@testable import MLXNN
 import XCTest
+
+@testable import MLXNN
 
 final class Float16ConstantCastTests: XCTestCase {
     func testDefaultAndExplicitConstantReusePolicy() {
         XCTAssertTrue(HadamardQuantizedLinear.float16ConstantReuseEnabled(environmentValue: nil))
         XCTAssertTrue(HadamardQuantizedLinear.float16ConstantReuseEnabled(environmentValue: "1"))
         for value in ["0", "", "false", "true", "off", "on", " 1", "invalid"] {
-            XCTAssertFalse(HadamardQuantizedLinear.float16ConstantReuseEnabled(environmentValue: value))
+            XCTAssertFalse(
+                HadamardQuantizedLinear.float16ConstantReuseEnabled(environmentValue: value))
         }
     }
 
     func testExplicitOptInReusesExactWideningForEveryHalfBitPattern() throws {
         let cache = ConstantArrayCastCache(enabled: true)
-        let source = MLXArray(Array(UInt16.min...UInt16.max)).view(dtype: .float16)
+        let source = MLXArray(Array(UInt16.min ... UInt16.max)).view(dtype: .float16)
         eval(source)
         XCTAssertNil(cache.cachedCast(source, to: .float32))
         let first = try XCTUnwrap(cache.cachedCast(source, to: .float32, allowFloat16: true))
         XCTAssertTrue(first === cache.cachedCast(source, to: .float32, allowFloat16: true))
-        XCTAssertEqual(first.asData(access: .copy).data,
+        XCTAssertEqual(
+            first.asData(access: .copy).data,
             source.asType(.float32).asData(access: .copy).data,
             "Includes signed zero, subnormals, infinities and NaN payloads")
         XCTAssertEqual(source.dtype, .float16)
         XCTAssertNil(cache.cachedCast(source, to: .float16, allowFloat16: true))
         XCTAssertNil(cache.cachedCast(source, to: .bfloat16, allowFloat16: true))
-        XCTAssertNil(ConstantArrayCastCache(enabled: false)
-            .cachedCast(source, to: .float32, allowFloat16: true))
+        XCTAssertNil(
+            ConstantArrayCastCache(enabled: false)
+                .cachedCast(source, to: .float32, allowFloat16: true))
         for dtype in [DType.uint8, .float32] {
-            XCTAssertNil(cache.cachedCast(MLXArray([1, 2]).asType(dtype),
-                to: .float32, allowFloat16: true))
+            XCTAssertNil(
+                cache.cachedCast(
+                    MLXArray([1, 2]).asType(dtype),
+                    to: .float32, allowFloat16: true))
         }
         cache.clear()
         XCTAssertFalse(first === cache.cachedCast(source, to: .float32, allowFloat16: true))
@@ -46,8 +52,9 @@ final class Float16ConstantCastTests: XCTestCase {
         XCTAssertEqual(changed.asArray(Float.self), [3, 4])
         XCTAssertEqual(old.asArray(Float.self), [1.25, -2.5])
         source[0] = MLXArray(Float(7)).asType(.float16)
-        XCTAssertEqual(cache.cachedCast(source, to: .float32, allowFloat16: true)!
-            .asArray(Float.self), [7, 4])
+        XCTAssertEqual(
+            cache.cachedCast(source, to: .float32, allowFloat16: true)!
+                .asArray(Float.self), [7, 4])
         Device.withDefaultDevice(.cpu) {
             let cpu = cache.cachedCast(source, to: .float32, allowFloat16: true)!
             XCTAssertEqual(cpu.asArray(Float.self), [7, 4])
@@ -74,23 +81,45 @@ final class Float16ConstantCastTests: XCTestCase {
     }
 
     private func layer(bits: Int = 2, group: Int = 128, block: Int = 1024)
-        throws -> HadamardQuantizedLinear {
+        throws -> HadamardQuantizedLinear
+    {
         let width = 1024
-        let transform = try SignedBlockHadamard(blockSize: block,
-            signs: (0..<width).map { $0 % 3 == 0 ? -1 : 1 })
-        let weight = MLXArray((0..<32 * width).map { Float(($0 * 13) % 31 - 15) / 16 },
-            [32, width]).asType(.float16)
+        let transform = try SignedBlockHadamard(
+            blockSize: block,
+            signs: (0 ..< width).map { $0 % 3 == 0 ? -1 : 1 })
+        let weight = MLXArray(
+            (0 ..< 32 * width).map { Float(($0 * 13) % 31 - 15) / 16 },
+            [32, width]
+        ).asType(.float16)
         let (packed, scales, offsets) = quantized(weight, groupSize: group, bits: bits)
-        let bias = (MLXArray(0..<32).asType(.float32) / Float(100)).asType(.float16)
-        return try HadamardQuantizedLinear(weight: packed, bias: bias, scales: scales,
+        let bias = (MLXArray(0 ..< 32).asType(.float32) / Float(100)).asType(.float16)
+        return try HadamardQuantizedLinear(
+            weight: packed, bias: bias, scales: scales,
             biases: offsets, groupSize: group, bits: bits, transform: transform,
             gdnLayout: HadamardGDNLayout(width: width, keyHeads: 2, valueHeads: 4))
     }
 
     private func reference(_ layer: HadamardQuantizedLinear, _ x: MLXArray) -> MLXArray {
-        var output = quantizedMM(layer.transform(layer.gdnLayout.map { $0(x) } ?? x),
-            layer.weight, scales: layer.scales, biases: layer.biases,
-            groupSize: layer.groupSize, bits: layer.bits)
+        let transformed = layer.transform(layer.gdnLayout.map { $0(x) } ?? x)
+        let eligible =
+            x.dtype == .float32 && x.ndim >= 2 && x.size / layer.transform.width > 1
+            && layer.bits == 2 && layer.groupSize == 128 && layer.transform.blockSize == 1024
+            && layer.scales.dtype == .float16
+        // Cache reuse must preserve the selected arithmetic contract. Bonsai
+        // FP32 multi-row calls now have the original singleton packed oracle.
+        let flat = transformed.reshaped([-1, layer.transform.width])
+        var output =
+            eligible
+            ? concatenated(
+                (0 ..< flat.dim(0)).map { row in
+                    quantizedMM(
+                        flat[row ..< (row + 1)], layer.weight, scales: layer.scales,
+                        biases: layer.biases, groupSize: layer.groupSize, bits: layer.bits)
+                }, axis: 0
+            ).reshaped(Array(x.shape.dropLast()) + [layer.weight.dim(0)])
+            : quantizedMM(
+                transformed, layer.weight, scales: layer.scales, biases: layer.biases,
+                groupSize: layer.groupSize, bits: layer.bits)
         if let bias = layer.bias { output = output + bias }
         return output
     }
@@ -98,7 +127,10 @@ final class Float16ConstantCastTests: XCTestCase {
     func testPackedLayerExactRepeatedCallsParameterTreeAndMutation() throws {
         final class Parent: Module {
             let child: HadamardQuantizedLinear
-            init(_ child: HadamardQuantizedLinear) { self.child = child; super.init() }
+            init(_ child: HadamardQuantizedLinear) {
+                self.child = child
+                super.init()
+            }
         }
         let layer = try layer()
         let override = ProcessInfo.processInfo.environment["DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"]
@@ -106,28 +138,40 @@ final class Float16ConstantCastTests: XCTestCase {
         let names = layer.parameters().flattened().map(\.0).sorted()
         for dtype in [DType.float32, .float16, .bfloat16, .float32] {
             for rows in [1, 129] {
-                let input = (MLXArray(0..<rows * 1024).reshaped(1, rows, 1024)
+                let input =
+                    (MLXArray(0 ..< rows * 1024).reshaped(1, rows, 1024)
                     .asType(.float32) / Float(1024)).asType(dtype)
-                for _ in 0..<2 {
-                    let actual = layer(input), expected = reference(layer, input)
+                for _ in 0 ..< 2 {
+                    let actual = layer(input)
+                    let expected = reference(layer, input)
                     XCTAssertEqual(actual.dtype, expected.dtype)
-                    XCTAssertEqual(actual.asData(access: .copy).data,
+                    XCTAssertEqual(
+                        actual.asData(access: .copy).data,
                         expected.asData(access: .copy).data)
                 }
             }
         }
         XCTAssertEqual(layer.parameters().flattened().map(\.0).sorted(), names)
-        let input = MLXArray.ones([1, 1024], dtype: .float32)
-        Parent(layer).update(parameters: ModuleParameters.unflattened([
-            ("child.scales", (layer.scales * 2).asType(.float16)),
-            ("child.bias", (layer.bias! + 1).asType(.float16)),
-        ]))
-        XCTAssertEqual(layer(input).asData(access: .copy).data,
-            reference(layer, input).asData(access: .copy).data)
+        // One row takes the singleton FP16-reuse path; three rows take the
+        // independent-rows path. Each mutation must invalidate both.
+        let inputs = [1, 3].map { MLXArray.ones([$0, 1024], dtype: .float32) }
+        Parent(layer).update(
+            parameters: ModuleParameters.unflattened([
+                ("child.scales", (layer.scales * 2).asType(.float16)),
+                ("child.bias", (layer.bias! + 1).asType(.float16)),
+            ]))
+        for input in inputs {
+            XCTAssertEqual(
+                layer(input).asData(access: .copy).data,
+                reference(layer, input).asData(access: .copy).data)
+        }
         layer.scales._updateInternal((layer.scales * 3).asType(.float16))
         layer.biases![0, 0] = MLXArray(Float(2)).asType(.float16)
-        XCTAssertEqual(layer(input).asData(access: .copy).data,
-            reference(layer, input).asData(access: .copy).data)
+        for input in inputs {
+            XCTAssertEqual(
+                layer(input).asData(access: .copy).data,
+                reference(layer, input).asData(access: .copy).data)
+        }
         XCTAssertEqual(layer.scales.dtype, .float16)
         XCTAssertEqual(layer.parameters().flattened().map(\.0).sorted(), names)
         XCTAssertTrue(layer.trainableParameters().flattened().isEmpty)
@@ -135,18 +179,29 @@ final class Float16ConstantCastTests: XCTestCase {
 
     func testPackedCompileStateReplacementAndIneligibleShapes() throws {
         let layer = try layer()
-        let input = MLXArray.ones([1, 1024], dtype: .float32)
-        eval(layer(input))
+        // One row takes the singleton FP16-reuse path; three rows take the
+        // independent-rows path.
+        let singleton = MLXArray.ones([1, 1024], dtype: .float32)
+        let input = MLXArray.ones([3, 1024], dtype: .float32)
+        eval(layer(singleton), layer(input))
         let compiled = compile(inputs: [layer]) { (x: MLXArray) in layer(x) }
         for multiplier in [Float(1), 2] {
-            layer.update(parameters: ModuleParameters.unflattened([
-                ("scales", (layer.scales * multiplier).asType(.float16))]))
-            XCTAssertEqual(compiled(input).asData(access: .copy).data,
-                reference(layer, input).asData(access: .copy).data)
+            layer.update(
+                parameters: ModuleParameters.unflattened([
+                    ("scales", (layer.scales * multiplier).asType(.float16))
+                ]))
+            for x in [singleton, input] {
+                XCTAssertEqual(
+                    compiled(x).asData(access: .copy).data,
+                    reference(layer, x).asData(access: .copy).data)
+            }
         }
-        for other in [try self.layer(bits: 4), try self.layer(group: 64), try self.layer(block: 128)] {
+        for other in [
+            try self.layer(bits: 4), try self.layer(group: 64), try self.layer(block: 128),
+        ] {
             XCTAssertFalse(other.permitsFloat16ConstantReuse)
-            XCTAssertEqual(other(input).asData(access: .copy).data,
+            XCTAssertEqual(
+                other(input).asData(access: .copy).data,
                 reference(other, input).asData(access: .copy).data)
         }
     }

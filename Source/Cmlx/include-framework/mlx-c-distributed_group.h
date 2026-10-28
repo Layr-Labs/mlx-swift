@@ -59,8 +59,11 @@ typedef void (*mlx_distributed_bootstrap_release)(void* context);
  * Strict JACCL initialization through an owner callback, without TCPAllGather.
  * Existing cached JACCL initialization is rejected; it is not reauthenticated.
  * Both callbacks are required. When release_context is non-null, this call
- * consumes one context reference on every path. Release can occur only when
- * the native backend cache is destroyed, not when one group handle is freed.
+ * consumes one context reference on every path. On success, release runs when
+ * the last reference to the native group is dropped; the backend cache and
+ * every group handle and graph that uses the group hold one, so in practice
+ * release runs at process exit. Do not call this concurrently with any other
+ * distributed initialization: the native backend cache is not locked.
  * Callback failure is permanent. This API itself does not authenticate bytes.
  * Bounds: 2..64 ranks, 1..1MiB per rank, at most 8MiB total; the total bound
  * must fit all ranks at their per-rank bound. Use a fresh worker per epoch.
@@ -76,8 +79,14 @@ int mlx_distributed_init_jaccl_with_bootstrap(
  * partials cross the link only as frames the installed codec seals and opens
  * (a frame is plaintext bytes + overhead). Callbacks run on the CPU stream's
  * thread, must not reenter MLX and must not throw; nonzero refuses (the
- * evaluation fails). counter advances by one per sealed all-sum, identically
- * on both ranks. A null seal removes the codec.
+ * evaluation fails). counter advances by one per evaluated sealed collective
+ * (all-sum, reduce-scatter, all-gather), identically on both ranks. It is one
+ * sequence per process: it starts at 0 in each process and is not reset when
+ * a codec is installed, so keys must be fresh per process for (key, counter)
+ * to stay unique. A null seal or a null open removes the codec and returns 0.
+ * Each graph copies the codec installed when the graph is built, context
+ * included: context must stay valid until every such graph is evaluated or
+ * freed, even after the codec is removed or replaced.
  */
 typedef int (*mlx_distributed_seal_fn)(
     void* context, const void* plaintext, size_t bytes, void* frame, uint64_t counter);

@@ -94,6 +94,58 @@ class HadamardLayerTests: XCTestCase {
         XCTAssertThrowsError(try HadamardGDNLayout(width: 512, keyHeads: 3, valueHeads: 4))
     }
 
+    /// Compare with independent original singleton calls, never a dense
+    /// dequantized GEMM or the same broadcast implementation as the candidate.
+    func testBonsaiFloat32RowsMatchSingletonPackedArithmetic() throws {
+        let width = 1024
+        let outputs = 32
+        let transform = try SignedBlockHadamard(
+            blockSize: width,
+            signs: (0 ..< width).map { $0 % 3 == 0 ? -1 : 1 })
+        let original = MLXArray(
+            (0 ..< outputs * width).map {
+                Float(($0 * 13) % 127 - 63) / 63
+            }, [outputs, width]
+        ).asType(.float16)
+        let (weight, scales, biases) = quantized(original, groupSize: 128, bits: 2)
+        for grouped in [false, true] {
+            let layout =
+                grouped ? try HadamardGDNLayout(width: width, keyHeads: 2, valueHeads: 4) : nil
+            for hasBias in [false, true] {
+                let bias =
+                    hasBias
+                    ? (MLXArray(0 ..< outputs).asType(.float32) / 100).asType(.float16) : nil
+                let layer = try HadamardQuantizedLinear(
+                    weight: weight, bias: bias,
+                    scales: scales, biases: biases, groupSize: 128, bits: 2,
+                    transform: transform, gdnLayout: layout)
+                let names = layer.parameters().flattened().map(\.0).sorted()
+                for shape in [
+                    [width], [1, width], [2, 3, width], [1, 511, width], [1, 512, width],
+                ] {
+                    let elements = shape.reduce(1, *)
+                    let input = MLXArray(
+                        (0 ..< elements).map {
+                            Float(($0 * 29) % 251 - 125) / 127
+                        }, shape)
+                    let flat = input.reshaped([-1, width])
+                    let expected = concatenated(
+                        (0 ..< flat.dim(0)).map { row in
+                            layer(flat[row ..< (row + 1)])
+                        }, axis: 0
+                    ).reshaped(Array(shape.dropLast()) + [outputs])
+                    let actual = layer(input)
+                    XCTAssertEqual(actual.dtype, .float32)
+                    XCTAssertEqual(actual.shape, expected.shape)
+                    XCTAssertEqual(
+                        actual.asData(access: .copy).data, expected.asData(access: .copy).data)
+                }
+                XCTAssertEqual(layer.parameters().flattened().map(\.0).sorted(), names)
+                XCTAssertTrue(layer.trainableParameters().flattened().isEmpty)
+            }
+        }
+    }
+
     func testConfigurationValidation() throws {
         var metadata: [String: Any] = [
             "prism.hadamard.version": 1,

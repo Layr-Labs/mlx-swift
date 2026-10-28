@@ -48,7 +48,8 @@ public struct SignedBlockHadamard {
     /// Recover the original basis after looking up folded embedding rows.
     public func inverse(_ x: MLXArray) -> MLXArray {
         validate(x)
-        return (hadamardTransform(x.asType(.float32).reshaped([-1, blockSize])).reshaped(x.shape)
+        return
+            (hadamardTransform(x.asType(.float32).reshaped([-1, blockSize])).reshaped(x.shape)
             * signs).asType(x.dtype)
     }
 
@@ -224,6 +225,18 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
 
     public override func callAsFunction(_ x: MLXArray) -> MLXArray {
         let rotated = transform(gdnLayout.map { $0(x) } ?? x)
+        // Bonsai's signed block1024/affine2 pack advertises FP32 arithmetic.
+        // Multi-row projections must not enter the architecture-dependent
+        // TF32 matrix kernel. Preserve the scalar packed reduction per row;
+        // singleton decode and every other Hadamard policy stay unchanged.
+        if rotated.dtype == .float32, rotated.ndim >= 2,
+            rotated.size / transform.width > 1, bits == 2, groupSize == 128,
+            transform.blockSize == 1024, scales.dtype == .float16
+        {
+            return constantCachedForward(
+                rotated, allowFloat16: permitsFloat16ConstantReuse,
+                independentRows: true)
+        }
         if permitsFloat16ConstantReuse && rotated.dtype == .float32 {
             return constantCachedForward(rotated, allowFloat16: true)
         }

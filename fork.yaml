@@ -60,10 +60,10 @@ def:
             1024-thread Metal groups without changing kernel math or dispatch geometry. The
             `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
             own C API. The two-Mac cluster stack pins the cluster core and C with main
-            merged in: `mlx` 70245518, the merge of upstream main `1ba7f969` (2026-10-30,
-            Layr-Labs/mlx#49) into Layr-Labs/mlx `main`, which contains 72dffa2d (the head of
-            Layr-Labs/mlx#41, with #35 and #33 under it), and `mlx-c` db5cb211
-            (Layr-Labs/mlx-c#20: Layr-Labs/mlx-c#15 in `main`, with the SDPA call passing no
+            merged in: `mlx` 15dd4571, the head of Layr-Labs/mlx#49 (the merge of upstream main
+            `1ba7f969` of 2026-10-30 into Layr-Labs/mlx `main`, which contains 72dffa2d, the
+            head of Layr-Labs/mlx#41 with #35 and #33 under it), and `mlx-c` 2db89819, the head
+            of Layr-Labs/mlx-c#20 (Layr-Labs/mlx-c#15 in `main`, with the SDPA call passing no
             window to upstream's new `window_size` argument).
             Beyond main they order the fast-synch GPU wait after every pending pass and earlier
             kernels in its current concurrent pass, make a GPU stream wait for another GPU stream

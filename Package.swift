@@ -310,6 +310,7 @@ let cmlx = Target.target(
         .headerSearchPath("mlx"),
         .headerSearchPath("mlx-c"),
         .headerSearchPath("mlx-generated/cuda"),
+        .define("NDEBUG", .when(configuration: .release)),
     ],
     cxxSettings: cxxSettings + [
         .headerSearchPath("mlx"),
@@ -317,6 +318,11 @@ let cmlx = Target.target(
         .headerSearchPath("json/single_include/nlohmann"),
         .headerSearchPath("fmt/include"),
         .define("MLX_VERSION", to: "\"0.32.2\""),
+        // Release builds leave out the core's debug-only work, as its CMake
+        // Release build does: per-dispatch graph checks, allocation tracking,
+        // asserts and Metal shader logging. Every C++ file that includes the
+        // core is in this target, so class layouts agree.
+        .define("NDEBUG", .when(configuration: .release)),
         .disableWarning("shorten-64-to-32"),
     ],
     linkerSettings: linkerSettings,

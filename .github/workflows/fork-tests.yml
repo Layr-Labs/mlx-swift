@@ -4,7 +4,7 @@ name: Fork Tests
 #
 # The jobs:
 #   route          Selects the runner of each job below: a Darkbloom Sandbox Mac when the Darkbloom plane grants one,
-#                  otherwise a Blacksmith macOS runner (darkbloom-route.yml).
+#                  otherwise the hosted macos-26 runner (darkbloom-route.yml).
 #   build          Builds the package and its tests one time.
 #   metallib       Builds the full Metal library, or restores it from the cache. It runs at the same time as build.
 #   test           One job for each shard. Each shard lists the tests, plans the shards and runs its part of the tests.
@@ -36,21 +36,22 @@ defaults:
     shell: bash
 
 jobs:
-  # Chooses a Darkbloom Sandbox or the Blacksmith fallback for each job below.
+  # Chooses a Darkbloom Sandbox or the fallback runner for each job below.
   # A lane is granted whole or falls back whole, so each test shard has its own lane.
   # The test-N lanes must match the shard count in .github/scripts/test-shards.json.
-  # The fallback is macOS 26: select-xcode needs a release of Xcode 26, and macOS 27 runners have only Xcode 27.
+  # The fallback is the hosted macos-26 runner that these jobs used before. select-xcode needs a release of Xcode 26,
+  # macOS 27 runners have only Xcode 27, and blacksmith-12vcpu-macos-26 did not start jobs for this organization (2026-10-31).
   route:
     uses: ./.github/workflows/darkbloom-route.yml
     permissions: {}
     with:
       lanes: |
-        build macos_arm64 blacksmith-12vcpu-macos-26
-        metallib macos_arm64 blacksmith-12vcpu-macos-26
-        test-1 macos_arm64 blacksmith-12vcpu-macos-26
-        test-2 macos_arm64 blacksmith-12vcpu-macos-26
-        test-3 macos_arm64 blacksmith-12vcpu-macos-26
-        build-and-test macos_arm64 blacksmith-12vcpu-macos-26
+        build macos_arm64 macos-26
+        metallib macos_arm64 macos-26
+        test-1 macos_arm64 macos-26
+        test-2 macos_arm64 macos-26
+        test-3 macos_arm64 macos-26
+        build-and-test macos_arm64 macos-26
 
   build:
     name: Build the package and its tests

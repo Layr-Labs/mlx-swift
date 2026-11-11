@@ -1,8 +1,10 @@
 name: Fork Tests
 
-# Build the fork and run its tests on GitHub-hosted macOS runners.
+# Build the fork and run its tests on macOS runners: a Darkbloom Sandbox when the route job gets one, otherwise GitHub-hosted.
 #
 # The jobs:
+#   shards         Reads the shard count, which the route job and the test matrix need.
+#   route          Asks Darkbloom for a runner for each macOS lane (darkbloom-route.yml). Each lane falls back to macos-26.
 #   build          Builds the package and its tests one time.
 #   metallib       Builds the full Metal library, or restores it from the cache. It runs at the same time as build.
 #   test           One job for each shard. Each shard lists the tests, plans the shards and runs its part of the tests.
@@ -34,14 +36,58 @@ defaults:
     shell: bash
 
 jobs:
-  build:
-    name: Build the package and its tests
-    runs-on: macos-26
-    timeout-minutes: 60
+  shards:
+    name: Read the shard count
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       shards: ${{ steps.plan.outputs.shards }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/test-shards.json
+          sparse-checkout-cone-mode: false
+
+      - name: Read the shard count
+        id: plan
+        run: |
+          count=$(python3 -c 'import json; print(json.load(open(".github/scripts/test-shards.json"))["shards"])')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "shards=$(python3 -c "import json; print(json.dumps(list(range(1, $count + 1))))")" >> "$GITHUB_OUTPUT"
+
+  route:
+    needs: shards
+    uses: ./.github/workflows/darkbloom-route.yml
+    permissions: {}
+    with:
+      lanes: |
+        build macos_arm64 macos-26
+        metallib macos_arm64 macos-26
+        test macos_arm64 macos-26 ${{ needs.shards.outputs.count }}
+        build-and-test macos_arm64 macos-26
+
+  build:
+    name: Build the package and its tests
+    needs: route
+    runs-on: ${{ fromJSON(needs.route.outputs.routes)['build'] }}
+    timeout-minutes: 60
+    outputs:
       bin: ${{ steps.pack.outputs.bin }}
     steps:
+      # A Darkbloom Sandbox without a Darkbloom cache must not reach GitHub's Actions cache, so there every cache step is skipped.
+      - name: Choose this job's Actions cache
+        run: |
+          if [[ ${RUNNER_NAME:-} != darkbloom-* ]]; then
+            echo "Actions cache: this runner's own"
+          elif [[ -n ${DARKBLOOM_CACHE_URL:-} ]]; then
+            echo "Actions cache: the Darkbloom cache at $DARKBLOOM_CACHE_URL"
+          else
+            echo "CI_ACTIONS_CACHE=off" >> "$GITHUB_ENV"
+            echo "::notice title=Actions cache::The plane gave this Darkbloom Sandbox no cache, so every cache step is skipped."
+          fi
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
@@ -75,6 +121,7 @@ jobs:
         # On a miss, the newest cache with the same Xcode version and pins is restored, then the newest with the same Xcode version.
         # ccache finds each object by a hash of its compile, so an older cache gives correct objects for the files that did not change.
         id: cache
+        if: env.CI_ACTIONS_CACHE != 'off'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -115,7 +162,7 @@ jobs:
 
       - name: Save the build cache
         # Save on main and on the pull request. A pull request can read the caches of main and of its own branch.
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: env.CI_ACTIONS_CACHE != 'off' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -123,11 +170,6 @@ jobs:
             ~/Library/org.swift.swiftpm
             ${{ runner.temp }}/ccache
           key: ${{ steps.cache.outputs.cache-primary-key }}
-
-      - name: Read the shard count
-        id: plan
-        run: |
-          echo "shards=$(python3 -c 'import json; print(json.dumps(list(range(1, json.load(open(".github/scripts/test-shards.json"))["shards"] + 1))))')" >> "$GITHUB_OUTPUT"
 
       - name: Pack the test products
         # The tests need the test bundle, the package state and the dependency checkouts. The object files and executables stay behind.
@@ -160,9 +202,22 @@ jobs:
 
   metallib:
     name: Build the full Metal library
-    runs-on: macos-26
+    needs: route
+    runs-on: ${{ fromJSON(needs.route.outputs.routes)['metallib'] }}
     timeout-minutes: 60
     steps:
+      # As in build: skip every cache step on a Darkbloom Sandbox that the plane gave no Darkbloom cache.
+      - name: Choose this job's Actions cache
+        run: |
+          if [[ ${RUNNER_NAME:-} != darkbloom-* ]]; then
+            echo "Actions cache: this runner's own"
+          elif [[ -n ${DARKBLOOM_CACHE_URL:-} ]]; then
+            echo "Actions cache: the Darkbloom cache at $DARKBLOOM_CACHE_URL"
+          else
+            echo "CI_ACTIONS_CACHE=off" >> "$GITHUB_ENV"
+            echo "::notice title=Actions cache::The plane gave this Darkbloom Sandbox no cache, so every cache step is skipped."
+          fi
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Select the newest release of Xcode 26
@@ -177,6 +232,7 @@ jobs:
         # The library depends only on the mlx submodule, the Metal compiler and the build script.
         # The key also has the generated Metal sources, which change only with the mlx pin.
         id: cache
+        if: env.CI_ACTIONS_CACHE != 'off'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/metallib-cache
@@ -193,7 +249,7 @@ jobs:
           echo "Metal library build: $(( seconds / 60 )) min $(( seconds % 60 )) s." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save the Metal library
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: env.CI_ACTIONS_CACHE != 'off' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/metallib-cache
@@ -216,13 +272,13 @@ jobs:
 
   test:
     name: Test shard ${{ matrix.shard }}
-    needs: [build, metallib]
-    runs-on: macos-26
+    needs: [shards, route, build, metallib]
+    runs-on: ${{ fromJSON(needs.route.outputs.routes)['test'] }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.build.outputs.shards) }}
+        shard: ${{ fromJSON(needs.shards.outputs.shards) }}
     env:
       BIN: ${{ needs.build.outputs.bin }}
     steps:
@@ -383,9 +439,9 @@ jobs:
   build-and-test:
     # This job keeps the check name of the old single job.
     name: build-and-test
-    needs: [build, metallib, test]
+    needs: [route, build, metallib, test]
     if: ${{ !cancelled() }}
-    runs-on: macos-26
+    runs-on: ${{ fromJSON(needs.route.outputs.routes)['build-and-test'] }}
     timeout-minutes: 20
     steps:
       - name: Check the results of the other jobs

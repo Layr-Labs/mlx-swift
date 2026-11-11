@@ -6,13 +6,13 @@ permissions:
   contents: read
 
 jobs:
-  # Asks Darkbloom for a macOS runner for the lint job (darkbloom-route.yml). The lane falls back to macos-26.
+  # Asks Darkbloom for a macOS runner for the lint job (darkbloom-route.yml). The lane falls back to xcode-27.
   route:
     uses: ./.github/workflows/darkbloom-route.yml
     permissions: {}
     with:
       lanes: |
-        lint macos_arm64 macos-26
+        lint macos_arm64 xcode-27
 
   lint:
     needs: route
@@ -27,7 +27,7 @@ jobs:
           # Fetch the merge commit and its parents. The first parent is the base branch.
           fetch-depth: 2
 
-      - name: Select the newest release of Xcode 26
+      - name: Select Xcode 27.2
         uses: ./.github/actions/select-xcode
 
       - name: Show the swift-format version

@@ -104,16 +104,15 @@ final class Float16ConstantCastTests: XCTestCase {
         let transformed = layer.transform(layer.gdnLayout.map { $0(x) } ?? x)
         let rows = x.size / layer.transform.width
         let perRow =
-            layer.independentRows || (x.ndim >= 3 && x.dim(-2) == 1)
-            || rows < HadamardQuantizedLinear.minimumBatchedRows
+            layer.independentRows || rows < HadamardQuantizedLinear.minimumBatchedRows
         let eligible =
             perRow && x.dtype == .float32 && x.ndim >= 2 && rows > 1
             && layer.bits == 2 && layer.groupSize == 128 && layer.transform.blockSize == 1024
             && layer.scales.dtype == .float16
         // Cache reuse must preserve the selected arithmetic contract. Bonsai
-        // FP32 multi-row calls with `independentRows`, single-Mac decode steps
-        // and calls below the batching threshold have the original singleton
-        // packed oracle; larger single-Mac calls, one batched packed matmul.
+        // FP32 multi-row calls with `independentRows`, and single-Mac calls
+        // below the batching threshold, have the original singleton packed
+        // oracle; larger single-Mac calls, one batched packed matmul.
         let flat = transformed.reshaped([-1, layer.transform.width])
         var output =
             eligible

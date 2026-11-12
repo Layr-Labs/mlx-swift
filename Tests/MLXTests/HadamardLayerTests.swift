@@ -196,43 +196,26 @@ class HadamardLayerTests: XCTestCase {
         }
     }
 
-    /// A single Mac's decode step carries one position per request, `[B, 1, H]`.
-    /// Its rows take the per-row path at every B, so each request computes the
-    /// bytes it computes decoding alone, whatever decodes beside it.
-    func testSingleMacDecodeRowsMatchSingletonPackedArithmetic() throws {
-        let fixture = try BonsaiRowsFixture()
-        for layout in [nil, fixture.grouped] {
-            let layer = try fixture.layer(layout: layout)
-            XCTAssertFalse(layer.independentRows)
-            for rows in [2, 4, 8, 16, 24] {
-                let input = fixture.input([rows, 1, fixture.width])
-                XCTAssertEqual(
-                    fixture.bytes(layer(input)), fixture.bytes(fixture.singletons(layer, input)),
-                    "decode rows \(rows)")
-            }
-        }
-    }
-
-    /// A single Mac's prompt call with fewer rows than the threshold takes the
-    /// per-row path; from the threshold on it takes one batched packed matmul.
-    func testSingleMacPromptRowsBatchFromTheThreshold() throws {
+    /// A single Mac's call with fewer rows than `minimumBatchedRows` takes the
+    /// per-row path (the bytes of separate singleton calls); from the threshold
+    /// on it takes one batched packed matmul. The same for a decode step
+    /// (`[B, 1, H]`, one position per request) as for a prompt (`[1, S, H]`).
+    func testSingleMacRowsBatchFromTheThreshold() throws {
         let fixture = try BonsaiRowsFixture()
         let threshold = HadamardQuantizedLinear.minimumBatchedRows
         XCTAssertEqual(threshold, 12)
         for layout in [nil, fixture.grouped] {
             let layer = try fixture.layer(layout: layout)
-            for rows in [2, threshold - 1] {
-                let input = fixture.input([1, rows, fixture.width])
-                XCTAssertEqual(
-                    fixture.bytes(layer(input)), fixture.bytes(fixture.singletons(layer, input)),
-                    "prompt rows \(rows)")
-            }
-            for rows in [threshold, threshold + 1, 512] {
-                let input = fixture.input([1, rows, fixture.width])
-                XCTAssertEqual(
-                    fixture.bytes(layer(input)),
-                    fixture.bytes(fixture.batched(input, layout: layout)),
-                    "prompt rows \(rows)")
+            XCTAssertFalse(layer.independentRows)
+            for rows in [2, 4, 8, threshold - 1, threshold, threshold + 1, 16, 24, 512] {
+                for shape in [[rows, 1, fixture.width], [1, rows, fixture.width]] {
+                    let input = fixture.input(shape)
+                    let expected =
+                        rows < threshold
+                        ? fixture.singletons(layer, input) : fixture.batched(input, layout: layout)
+                    XCTAssertEqual(
+                        fixture.bytes(layer(input)), fixture.bytes(expected), "shape \(shape)")
+                }
             }
         }
     }

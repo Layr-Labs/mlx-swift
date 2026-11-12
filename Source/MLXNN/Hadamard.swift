@@ -184,21 +184,21 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
     /// the single-row (M=1) kernel, giving the bytes of separate singleton
     /// calls on every chip. A caller whose machines must agree byte for byte
     /// (the stages of a pair) asks for it. Off by default (a single Mac): only
-    /// decode steps and calls of fewer than `minimumBatchedRows` rows take the
-    /// per-row path (`takesPerRowPath`); larger prompt calls take the batched
-    /// matrix kernel (TF32 on M5, FP32 elsewhere), several times faster but not
-    /// the singleton bytes. Other profiles and singleton calls are the same
-    /// either way.
+    /// calls of fewer than `minimumBatchedRows` rows take the per-row path;
+    /// larger calls take the batched matrix kernel (TF32 on M5, FP32
+    /// elsewhere), several times faster but not the singleton bytes. Other
+    /// profiles and singleton calls are the same either way.
     public let independentRows: Bool
 
-    /// The fewest rows a single Mac's prompt call of the block1024 profile
-    /// batches. Below it, MLX multiplies the 27B's projections (all wider than
+    /// The fewest rows a single Mac's call of the block1024 profile batches,
+    /// for speed. Below it (a decode step of up to 11 requests, or a tiny
+    /// prompt), MLX would multiply the 27B's projections (all wider than
     /// 4,096) with its vector kernels anyway: its vector limit for them is 12
     /// on Ultras and 6 to 13 on other chips (`get_qmv_batch_limit`). There,
     /// the per-row path measured faster than one batched call (M5 Ultra,
-    /// steady two-request decode: 78.4 vs 71.5 tok/s), and it keeps the
-    /// singleton bytes. From it, the matrix kernel's weight reuse wins
-    /// (prefill 6.4 to 7.0 times faster at 1K to 8K tokens).
+    /// steady two-request decode: 78.4 vs 71.5 tok/s). From it, the matrix
+    /// kernel's weight reuse wins (prefill 6.4 to 7.0 times faster at 1K to
+    /// 8K tokens).
     public static let minimumBatchedRows = 12
     private static let reuseFloat16Constants = float16ConstantReuseEnabled(
         environmentValue: ProcessInfo.processInfo.environment[
@@ -269,13 +269,10 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
         return super.callAsFunction(rotated)
     }
 
-    /// Every multi-row call with `independentRows`. Otherwise a decode step
-    /// (one position per sequence, `[..., B, 1, H]`) at any B, so a request
-    /// decodes the bytes it decodes alone whatever decodes beside it, and any
-    /// call of fewer than `minimumBatchedRows` rows.
+    /// Every multi-row call with `independentRows`; otherwise a call of fewer
+    /// than `minimumBatchedRows` rows.
     func takesPerRowPath(_ x: MLXArray) -> Bool {
-        independentRows || (x.ndim >= 3 && x.dim(-2) == 1)
-            || x.size / transform.width < Self.minimumBatchedRows
+        independentRows || x.size / transform.width < Self.minimumBatchedRows
     }
 }
 

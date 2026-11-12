@@ -260,17 +260,16 @@ def:
             profile with FP16 scales sends each row through the single-row (M=1)
             quantized kernel (the per-row path), so the call gives the bytes of
             separate singleton calls and does not use the architecture-dependent
-            TF32 matrix kernel, in three cases: always for a layer built with
+            TF32 matrix kernel, in two cases: always for a layer built with
             `independentRows: true` (the stages of a pair, whose machines must
-            agree byte for byte); for a decode step (`[..., B, 1, H]`) at any B,
-            so a request decodes the bytes it decodes alone; and for a call of
-            fewer than `minimumBatchedRows` (12) rows, below MLX's vector limit
-            for these widths, where per-row measured faster. A single Mac's
-            larger prompt calls take one batched packed matmul (TF32 on M5,
-            FP32 elsewhere): prompt speed, not the singleton bytes. Other
-            profiles and singleton calls are the same either way.
-            `DARKBLOOM_BONSAI_F16_CONSTANT_CACHE` does not change which kernel
-            runs. `HadamardLayerTests` compares decode steps and calls below the
+            agree byte for byte), and on a single Mac for a call of fewer than
+            `minimumBatchedRows` (12) rows (a decode step of up to 11 requests,
+            or a tiny prompt), below MLX's vector limit for these widths, where
+            per-row measured faster. A single Mac's larger calls take one batched
+            packed matmul (TF32 on M5, FP32 elsewhere): prompt speed, not the
+            singleton bytes. Other profiles and singleton calls are the same
+            either way. `DARKBLOOM_BONSAI_F16_CONSTANT_CACHE` does not change
+            which kernel runs. `HadamardLayerTests` compares calls below the
             threshold, and every `independentRows` call, with separate singleton
             calls, and calls from the threshold on with one batched
             `quantizedMM`.

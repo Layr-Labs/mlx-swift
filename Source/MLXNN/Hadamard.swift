@@ -179,15 +179,26 @@ public struct HadamardGDNLayout {
 public final class HadamardQuantizedLinear: QuantizedLinear {
     public let transform: SignedBlockHadamard
     public let gdnLayout: HadamardGDNLayout?
-    /// Whether FP32 input of more than one row to the 2-bit/group128/block1024
-    /// profile with FP16 scales runs each row through the single-row (M=1)
-    /// kernel, giving the bytes of separate singleton calls on every chip.
-    /// A caller whose machines must agree byte for byte (the stages of a
-    /// pair) asks for it. Off by default: such input takes the batched matrix
-    /// kernel (TF32 on M5, FP32 elsewhere), several times faster for prompts
-    /// but not the singleton bytes. Other profiles and singleton calls are
-    /// the same either way.
+    /// Whether every FP32 input of more than one row to the
+    /// 2-bit/group128/block1024 profile with FP16 scales runs each row through
+    /// the single-row (M=1) kernel, giving the bytes of separate singleton
+    /// calls on every chip. A caller whose machines must agree byte for byte
+    /// (the stages of a pair) asks for it. Off by default (a single Mac): only
+    /// calls of fewer than `minimumBatchedRows` rows take the per-row path;
+    /// larger calls take the batched matrix kernel (TF32 on M5, FP32
+    /// elsewhere), several times faster but not the singleton bytes. Other
+    /// profiles and singleton calls are the same either way.
     public let independentRows: Bool
+
+    /// The fewest rows a single Mac's call of the block1024 profile batches,
+    /// for speed. Measured in the provider's real decode step on an M5 Ultra,
+    /// the per-row path wins only at two rows (two requests: 78.6 vs 71.1
+    /// tok/s); at three it ties (95.9 vs 96.7) and at four it loses (107.3 vs
+    /// 116.0). So two rows (a two-request decode step, as every chip ran it
+    /// through 0.10.11) take the per-row path, and three or more batch,
+    /// prompts included (6.4 to 7.0 times faster than per-row at 1K to 8K
+    /// tokens).
+    public static let minimumBatchedRows = 3
     private static let reuseFloat16Constants = float16ConstantReuseEnabled(
         environmentValue: ProcessInfo.processInfo.environment[
             "DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"])
@@ -240,12 +251,12 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
 
     public override func callAsFunction(_ x: MLXArray) -> MLXArray {
         let rotated = transform(gdnLayout.map { $0(x) } ?? x)
-        // Only a caller that asked for `independentRows` keeps multi-row FP32
-        // projections out of the architecture-dependent TF32 matrix kernel,
-        // with the scalar packed reduction per row. Singleton decode and
-        // every other Hadamard policy take the paths below either way.
-        if independentRows, isBlock1024Profile, rotated.dtype == .float32,
-            rotated.ndim >= 2, rotated.size / transform.width > 1
+        // The per-row path keeps a multi-row FP32 projection out of the
+        // architecture-dependent TF32 matrix kernel, with the scalar packed
+        // reduction per row. Singleton calls and every other Hadamard policy
+        // take the paths below either way.
+        if isBlock1024Profile, rotated.dtype == .float32, rotated.ndim >= 2,
+            rotated.size / transform.width > 1, takesPerRowPath(rotated)
         {
             return constantCachedForward(
                 rotated, allowFloat16: permitsFloat16ConstantReuse,
@@ -255,6 +266,12 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
             return constantCachedForward(rotated, allowFloat16: true)
         }
         return super.callAsFunction(rotated)
+    }
+
+    /// Every multi-row call with `independentRows`; otherwise a call of fewer
+    /// than `minimumBatchedRows` rows.
+    func takesPerRowPath(_ x: MLXArray) -> Bool {
+        independentRows || x.size / transform.width < Self.minimumBatchedRows
     }
 }
 

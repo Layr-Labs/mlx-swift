@@ -102,14 +102,17 @@ final class Float16ConstantCastTests: XCTestCase {
 
     private func reference(_ layer: HadamardQuantizedLinear, _ x: MLXArray) -> MLXArray {
         let transformed = layer.transform(layer.gdnLayout.map { $0(x) } ?? x)
+        let rows = x.size / layer.transform.width
+        let perRow =
+            layer.independentRows || rows < HadamardQuantizedLinear.minimumBatchedRows
         let eligible =
-            layer.independentRows && x.dtype == .float32 && x.ndim >= 2
-            && x.size / layer.transform.width > 1
+            perRow && x.dtype == .float32 && x.ndim >= 2 && rows > 1
             && layer.bits == 2 && layer.groupSize == 128 && layer.transform.blockSize == 1024
             && layer.scales.dtype == .float16
-        // Cache reuse must preserve the selected arithmetic contract. With
-        // `independentRows`, Bonsai FP32 multi-row calls have the original
-        // singleton packed oracle; by default, one batched packed matmul.
+        // Cache reuse must preserve the selected arithmetic contract. Bonsai
+        // FP32 multi-row calls with `independentRows`, and single-Mac calls
+        // below the batching threshold, have the original singleton packed
+        // oracle; larger single-Mac calls, one batched packed matmul.
         let flat = transformed.reshaped([-1, layer.transform.width])
         var output =
             eligible
@@ -161,10 +164,10 @@ final class Float16ConstantCastTests: XCTestCase {
             }
         }
         XCTAssertEqual(layer.parameters().flattened().map(\.0).sorted(), names)
-        // One row takes the singleton FP16-reuse path; three rows take the
-        // batched path, or the independent-rows path with `independentRows`.
-        // Each mutation must invalidate both.
-        let inputs = [1, 3].map { MLXArray.ones([$0, 1024], dtype: .float32) }
+        // One row takes the singleton FP16-reuse path and two rows the
+        // per-row path; sixteen rows take the batched path, or the per-row
+        // path with `independentRows`. Each mutation must invalidate all.
+        let inputs = [1, 2, 16].map { MLXArray.ones([$0, 1024], dtype: .float32) }
         Parent(layer).update(
             parameters: ModuleParameters.unflattened([
                 ("child.scales", (layer.scales * 2).asType(.float16)),
@@ -187,6 +190,26 @@ final class Float16ConstantCastTests: XCTestCase {
         XCTAssertTrue(layer.trainableParameters().flattened().isEmpty)
     }
 
+    /// The single-Mac switch itself, whatever bytes this machine's kernels give
+    /// the two paths: two rows take the per-row path and three rows batch, for
+    /// decode-shaped, prompt-shaped and flat calls; `independentRows` takes the
+    /// per-row path at any row count.
+    func testSingleMacPerRowPathSwitchesBetweenTwoAndThreeRows() throws {
+        let single = try layer()
+        let pair = try layer(independentRows: true)
+        let shapes = { (rows: Int) in [[rows, 1, 1024], [1, rows, 1024], [rows, 1024]] }
+        for shape in shapes(2) {
+            let x = MLXArray.zeros(shape, dtype: .float32)
+            XCTAssertTrue(single.takesPerRowPath(x), "\(shape)")
+            XCTAssertTrue(pair.takesPerRowPath(x), "\(shape)")
+        }
+        for shape in shapes(3) + shapes(12) + [[1, 512, 1024]] {
+            let x = MLXArray.zeros(shape, dtype: .float32)
+            XCTAssertFalse(single.takesPerRowPath(x), "\(shape)")
+            XCTAssertTrue(pair.takesPerRowPath(x), "\(shape)")
+        }
+    }
+
     func testPackedCompileStateReplacementAndIneligibleShapes() throws {
         for independentRows in [false, true] {
             try checkPackedCompileStateReplacement(independentRows: independentRows)
@@ -195,18 +218,20 @@ final class Float16ConstantCastTests: XCTestCase {
 
     private func checkPackedCompileStateReplacement(independentRows: Bool) throws {
         let layer = try layer(independentRows: independentRows)
-        // One row takes the singleton FP16-reuse path; three rows take the
-        // batched path, or the independent-rows path with `independentRows`.
+        // One row takes the singleton FP16-reuse path and two rows the
+        // per-row path; sixteen rows take the batched path, or the per-row
+        // path with `independentRows`.
         let singleton = MLXArray.ones([1, 1024], dtype: .float32)
-        let input = MLXArray.ones([3, 1024], dtype: .float32)
-        eval(layer(singleton), layer(input))
+        let input = MLXArray.ones([2, 1024], dtype: .float32)
+        let wide = MLXArray.ones([16, 1024], dtype: .float32)
+        eval(layer(singleton), layer(input), layer(wide))
         let compiled = compile(inputs: [layer]) { (x: MLXArray) in layer(x) }
         for multiplier in [Float(1), 2] {
             layer.update(
                 parameters: ModuleParameters.unflattened([
                     ("scales", (layer.scales * multiplier).asType(.float16))
                 ]))
-            for x in [singleton, input] {
+            for x in [singleton, input, wide] {
                 XCTAssertEqual(
                     compiled(x).asData(access: .copy).data,
                     reference(layer, x).asData(access: .copy).data)
@@ -218,9 +243,11 @@ final class Float16ConstantCastTests: XCTestCase {
             try self.layer(block: 128, independentRows: independentRows),
         ] {
             XCTAssertFalse(other.permitsFloat16ConstantReuse)
-            XCTAssertEqual(
-                other(input).asData(access: .copy).data,
-                reference(other, input).asData(access: .copy).data)
+            for x in [input, wide] {
+                XCTAssertEqual(
+                    other(x).asData(access: .copy).data,
+                    reference(other, x).asData(access: .copy).data)
+            }
         }
     }
 }

@@ -263,11 +263,12 @@ def:
             TF32 matrix kernel, in two cases: always for a layer built with
             `independentRows: true` (the stages of a pair, whose machines must
             agree byte for byte), and on a single Mac for a call of fewer than
-            `minimumBatchedRows` (12) rows (a decode step of up to 11 requests,
-            or a tiny prompt), below MLX's vector limit for these widths, where
-            per-row measured faster. A single Mac's larger calls take one batched
-            packed matmul (TF32 on M5, FP32 elsewhere): prompt speed, not the
-            singleton bytes. Other profiles and singleton calls are the same
+            `minimumBatchedRows` (3) rows, i.e. a two-request decode step, where
+            per-row measured faster in the provider's real decode step (M5 Ultra:
+            78.6 vs 71.1 tok/s at two requests; a tie at three, slower at four).
+            A single Mac's calls of three or more rows take one batched packed
+            matmul (TF32 on M5, FP32 elsewhere): prompt and larger-batch speed,
+            not the singleton bytes. Other profiles and singleton calls are the same
             either way. `DARKBLOOM_BONSAI_F16_CONSTANT_CACHE` does not change
             which kernel runs. `HadamardLayerTests` compares calls below the
             threshold, and every `independentRows` call, with separate singleton

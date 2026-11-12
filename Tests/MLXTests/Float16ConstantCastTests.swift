@@ -164,10 +164,10 @@ final class Float16ConstantCastTests: XCTestCase {
             }
         }
         XCTAssertEqual(layer.parameters().flattened().map(\.0).sorted(), names)
-        // One row takes the singleton FP16-reuse path and three rows the
+        // One row takes the singleton FP16-reuse path and two rows the
         // per-row path; sixteen rows take the batched path, or the per-row
         // path with `independentRows`. Each mutation must invalidate all.
-        let inputs = [1, 3, 16].map { MLXArray.ones([$0, 1024], dtype: .float32) }
+        let inputs = [1, 2, 16].map { MLXArray.ones([$0, 1024], dtype: .float32) }
         Parent(layer).update(
             parameters: ModuleParameters.unflattened([
                 ("child.scales", (layer.scales * 2).asType(.float16)),
@@ -198,11 +198,11 @@ final class Float16ConstantCastTests: XCTestCase {
 
     private func checkPackedCompileStateReplacement(independentRows: Bool) throws {
         let layer = try layer(independentRows: independentRows)
-        // One row takes the singleton FP16-reuse path and three rows the
+        // One row takes the singleton FP16-reuse path and two rows the
         // per-row path; sixteen rows take the batched path, or the per-row
         // path with `independentRows`.
         let singleton = MLXArray.ones([1, 1024], dtype: .float32)
-        let input = MLXArray.ones([3, 1024], dtype: .float32)
+        let input = MLXArray.ones([2, 1024], dtype: .float32)
         let wide = MLXArray.ones([16, 1024], dtype: .float32)
         eval(layer(singleton), layer(input), layer(wide))
         let compiled = compile(inputs: [layer]) { (x: MLXArray) in layer(x) }

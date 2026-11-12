@@ -191,15 +191,14 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
     public let independentRows: Bool
 
     /// The fewest rows a single Mac's call of the block1024 profile batches,
-    /// for speed. Below it (a decode step of up to 11 requests, or a tiny
-    /// prompt), MLX would multiply the 27B's projections (all wider than
-    /// 4,096) with its vector kernels anyway: its vector limit for them is 12
-    /// on Ultras and 6 to 13 on other chips (`get_qmv_batch_limit`). There,
-    /// the per-row path measured faster than one batched call (M5 Ultra,
-    /// steady two-request decode: 78.4 vs 71.5 tok/s). From it, the matrix
-    /// kernel's weight reuse wins (prefill 6.4 to 7.0 times faster at 1K to
-    /// 8K tokens).
-    public static let minimumBatchedRows = 12
+    /// for speed. Measured in the provider's real decode step on an M5 Ultra,
+    /// the per-row path wins only at two rows (two requests: 78.6 vs 71.1
+    /// tok/s); at three it ties (95.9 vs 96.7) and at four it loses (107.3 vs
+    /// 116.0). So two rows (a two-request decode step, as every chip ran it
+    /// through 0.10.11) take the per-row path, and three or more batch,
+    /// prompts included (6.4 to 7.0 times faster than per-row at 1K to 8K
+    /// tokens).
+    public static let minimumBatchedRows = 3
     private static let reuseFloat16Constants = float16ConstantReuseEnabled(
         environmentValue: ProcessInfo.processInfo.environment[
             "DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"])

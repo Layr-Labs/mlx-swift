@@ -202,8 +202,8 @@ class HadamardLayerTests: XCTestCase {
     /// (`[B, 1, H]`, one position per request) as for a prompt (`[1, S, H]`).
     func testSingleMacRowsBatchFromTheThreshold() throws {
         let fixture = try BonsaiRowsFixture()
-        let threshold = 3
-        XCTAssertEqual(HadamardQuantizedLinear.minimumBatchedRows, threshold)
+        let threshold = HadamardQuantizedLinear.minimumBatchedRows
+        XCTAssertEqual(threshold, 3)
         for layout in [nil, fixture.grouped] {
             let layer = try fixture.layer(layout: layout)
             XCTAssertFalse(layer.independentRows)

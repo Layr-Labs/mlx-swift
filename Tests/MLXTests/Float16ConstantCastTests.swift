@@ -190,6 +190,26 @@ final class Float16ConstantCastTests: XCTestCase {
         XCTAssertTrue(layer.trainableParameters().flattened().isEmpty)
     }
 
+    /// The single-Mac switch itself, whatever bytes this machine's kernels give
+    /// the two paths: two rows take the per-row path and three rows batch, for
+    /// decode-shaped, prompt-shaped and flat calls; `independentRows` takes the
+    /// per-row path at any row count.
+    func testSingleMacPerRowPathSwitchesBetweenTwoAndThreeRows() throws {
+        let single = try layer()
+        let pair = try layer(independentRows: true)
+        let shapes = { (rows: Int) in [[rows, 1, 1024], [1, rows, 1024], [rows, 1024]] }
+        for shape in shapes(2) {
+            let x = MLXArray.zeros(shape, dtype: .float32)
+            XCTAssertTrue(single.takesPerRowPath(x), "\(shape)")
+            XCTAssertTrue(pair.takesPerRowPath(x), "\(shape)")
+        }
+        for shape in shapes(3) + shapes(12) + [[1, 512, 1024]] {
+            let x = MLXArray.zeros(shape, dtype: .float32)
+            XCTAssertFalse(single.takesPerRowPath(x), "\(shape)")
+            XCTAssertTrue(pair.takesPerRowPath(x), "\(shape)")
+        }
+    }
+
     func testPackedCompileStateReplacementAndIneligibleShapes() throws {
         for independentRows in [false, true] {
             try checkPackedCompileStateReplacement(independentRows: independentRows)

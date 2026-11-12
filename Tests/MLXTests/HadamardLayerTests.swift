@@ -146,6 +146,48 @@ class HadamardLayerTests: XCTestCase {
         }
     }
 
+    /// By default a prompt's FP32 rows take one packed matmul over all rows,
+    /// with the exactly widened FP32 constants: single-Mac prefill speed.
+    func testBonsaiFloat32RowsDefaultToOneBatchedPackedMatmul() throws {
+        let width = 1024
+        let outputs = 32
+        let transform = try SignedBlockHadamard(
+            blockSize: width,
+            signs: (0 ..< width).map { $0 % 3 == 0 ? -1 : 1 })
+        let original = MLXArray(
+            (0 ..< outputs * width).map {
+                Float(($0 * 13) % 127 - 63) / 63
+            }, [outputs, width]
+        ).asType(.float16)
+        let (weight, scales, biases) = quantized(original, groupSize: 128, bits: 2)
+        let bias = (MLXArray(0 ..< outputs).asType(.float32) / 100).asType(.float16)
+        let layout = try HadamardGDNLayout(width: width, keyHeads: 2, valueHeads: 4)
+        for grouped in [false, true] {
+            let layer = try HadamardQuantizedLinear(
+                weight: weight, bias: bias,
+                scales: scales, biases: biases, groupSize: 128, bits: 2,
+                transform: transform, gdnLayout: grouped ? layout : nil)
+            for shape in [[1, 512, width], [4, 128, width]] {
+                let elements = shape.reduce(1, *)
+                let input = MLXArray(
+                    (0 ..< elements).map {
+                        Float(($0 * 29) % 251 - 125) / 127
+                    }, shape)
+                let expected =
+                    quantizedMM(
+                        transform(grouped ? layout(input) : input), weight,
+                        scales: scales.asType(.float32), biases: biases?.asType(.float32),
+                        transpose: true, groupSize: 128, bits: 2)
+                    + bias.asType(.float32)
+                let actual = layer(input)
+                XCTAssertEqual(actual.dtype, .float32)
+                XCTAssertEqual(actual.shape, expected.shape)
+                XCTAssertEqual(
+                    actual.asData(access: .copy).data, expected.asData(access: .copy).data)
+            }
+        }
+    }
+
     func testConfigurationValidation() throws {
         var metadata: [String: Any] = [
             "prism.hadamard.version": 1,

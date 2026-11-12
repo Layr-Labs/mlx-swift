@@ -179,15 +179,27 @@ public struct HadamardGDNLayout {
 public final class HadamardQuantizedLinear: QuantizedLinear {
     public let transform: SignedBlockHadamard
     public let gdnLayout: HadamardGDNLayout?
-    /// Whether FP32 input of more than one row to the 2-bit/group128/block1024
-    /// profile with FP16 scales runs each row through the single-row (M=1)
-    /// kernel, giving the bytes of separate singleton calls on every chip.
-    /// A caller whose machines must agree byte for byte (the stages of a
-    /// pair) asks for it. Off by default: such input takes the batched matrix
-    /// kernel (TF32 on M5, FP32 elsewhere), several times faster for prompts
-    /// but not the singleton bytes. Other profiles and singleton calls are
-    /// the same either way.
+    /// Whether every FP32 input of more than one row to the
+    /// 2-bit/group128/block1024 profile with FP16 scales runs each row through
+    /// the single-row (M=1) kernel, giving the bytes of separate singleton
+    /// calls on every chip. A caller whose machines must agree byte for byte
+    /// (the stages of a pair) asks for it. Off by default (a single Mac): only
+    /// decode steps and calls of fewer than `minimumBatchedRows` rows take the
+    /// per-row path (`takesPerRowPath`); larger prompt calls take the batched
+    /// matrix kernel (TF32 on M5, FP32 elsewhere), several times faster but not
+    /// the singleton bytes. Other profiles and singleton calls are the same
+    /// either way.
     public let independentRows: Bool
+
+    /// The fewest rows a single Mac's prompt call of the block1024 profile
+    /// batches. Below it, MLX multiplies the 27B's projections (all wider than
+    /// 4,096) with its vector kernels anyway: its vector limit for them is 12
+    /// on Ultras and 6 to 13 on other chips (`get_qmv_batch_limit`). There,
+    /// the per-row path measured faster than one batched call (M5 Ultra,
+    /// steady two-request decode: 78.4 vs 71.5 tok/s), and it keeps the
+    /// singleton bytes. From it, the matrix kernel's weight reuse wins
+    /// (prefill 6.4 to 7.0 times faster at 1K to 8K tokens).
+    public static let minimumBatchedRows = 12
     private static let reuseFloat16Constants = float16ConstantReuseEnabled(
         environmentValue: ProcessInfo.processInfo.environment[
             "DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"])
@@ -240,12 +252,12 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
 
     public override func callAsFunction(_ x: MLXArray) -> MLXArray {
         let rotated = transform(gdnLayout.map { $0(x) } ?? x)
-        // Only a caller that asked for `independentRows` keeps multi-row FP32
-        // projections out of the architecture-dependent TF32 matrix kernel,
-        // with the scalar packed reduction per row. Singleton decode and
-        // every other Hadamard policy take the paths below either way.
-        if independentRows, isBlock1024Profile, rotated.dtype == .float32,
-            rotated.ndim >= 2, rotated.size / transform.width > 1
+        // The per-row path keeps a multi-row FP32 projection out of the
+        // architecture-dependent TF32 matrix kernel, with the scalar packed
+        // reduction per row. Singleton calls and every other Hadamard policy
+        // take the paths below either way.
+        if isBlock1024Profile, rotated.dtype == .float32, rotated.ndim >= 2,
+            rotated.size / transform.width > 1, takesPerRowPath(rotated)
         {
             return constantCachedForward(
                 rotated, allowFloat16: permitsFloat16ConstantReuse,
@@ -255,6 +267,15 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
             return constantCachedForward(rotated, allowFloat16: true)
         }
         return super.callAsFunction(rotated)
+    }
+
+    /// Every multi-row call with `independentRows`. Otherwise a decode step
+    /// (one position per sequence, `[..., B, 1, H]`) at any B, so a request
+    /// decodes the bytes it decodes alone whatever decodes beside it, and any
+    /// call of fewer than `minimumBatchedRows` rows.
+    func takesPerRowPath(_ x: MLXArray) -> Bool {
+        independentRows || (x.ndim >= 3 && x.dim(-2) == 1)
+            || x.size / transform.width < Self.minimumBatchedRows
     }
 }
 

@@ -148,9 +148,10 @@ class HadamardLayerTests: XCTestCase {
         }
     }
 
-    /// By default a prompt's FP32 rows take one packed matmul over all rows,
-    /// with the exactly widened FP32 constants: single-Mac prefill speed.
-    /// `independentRows` changes only the block1024 profile.
+    /// By default a prompt chunk of `minimumBatchedRows` or more FP32 rows
+    /// takes one packed matmul over all rows, with the exactly widened FP32
+    /// constants: single-Mac prefill speed. `independentRows` changes only the
+    /// block1024 profile.
     func testBonsaiFloat32RowsDefaultToOneBatchedPackedMatmul() throws {
         let width = 1024
         let outputs = 32
@@ -216,7 +217,8 @@ class HadamardLayerTests: XCTestCase {
     /// per-row path; from the threshold on it takes one batched packed matmul.
     func testSingleMacPromptRowsBatchFromTheThreshold() throws {
         let fixture = try BonsaiRowsFixture()
-        let threshold = 12
+        let threshold = HadamardQuantizedLinear.minimumBatchedRows
+        XCTAssertEqual(threshold, 12)
         for layout in [nil, fixture.grouped] {
             let layer = try fixture.layer(layout: layout)
             for rows in [2, threshold - 1] {

@@ -102,14 +102,18 @@ final class Float16ConstantCastTests: XCTestCase {
 
     private func reference(_ layer: HadamardQuantizedLinear, _ x: MLXArray) -> MLXArray {
         let transformed = layer.transform(layer.gdnLayout.map { $0(x) } ?? x)
+        let rows = x.size / layer.transform.width
+        let perRow =
+            layer.independentRows || (x.ndim >= 3 && x.dim(-2) == 1)
+            || rows < HadamardQuantizedLinear.minimumBatchedRows
         let eligible =
-            layer.independentRows && x.dtype == .float32 && x.ndim >= 2
-            && x.size / layer.transform.width > 1
+            perRow && x.dtype == .float32 && x.ndim >= 2 && rows > 1
             && layer.bits == 2 && layer.groupSize == 128 && layer.transform.blockSize == 1024
             && layer.scales.dtype == .float16
-        // Cache reuse must preserve the selected arithmetic contract. With
-        // `independentRows`, Bonsai FP32 multi-row calls have the original
-        // singleton packed oracle; by default, one batched packed matmul.
+        // Cache reuse must preserve the selected arithmetic contract. Bonsai
+        // FP32 multi-row calls with `independentRows`, single-Mac decode steps
+        // and calls below the batching threshold have the original singleton
+        // packed oracle; larger single-Mac calls, one batched packed matmul.
         let flat = transformed.reshaped([-1, layer.transform.width])
         var output =
             eligible
@@ -161,10 +165,10 @@ final class Float16ConstantCastTests: XCTestCase {
             }
         }
         XCTAssertEqual(layer.parameters().flattened().map(\.0).sorted(), names)
-        // One row takes the singleton FP16-reuse path; three rows take the
-        // batched path, or the independent-rows path with `independentRows`.
-        // Each mutation must invalidate both.
-        let inputs = [1, 3].map { MLXArray.ones([$0, 1024], dtype: .float32) }
+        // One row takes the singleton FP16-reuse path and three rows the
+        // per-row path; sixteen rows take the batched path, or the per-row
+        // path with `independentRows`. Each mutation must invalidate all.
+        let inputs = [1, 3, 16].map { MLXArray.ones([$0, 1024], dtype: .float32) }
         Parent(layer).update(
             parameters: ModuleParameters.unflattened([
                 ("child.scales", (layer.scales * 2).asType(.float16)),
@@ -195,18 +199,20 @@ final class Float16ConstantCastTests: XCTestCase {
 
     private func checkPackedCompileStateReplacement(independentRows: Bool) throws {
         let layer = try layer(independentRows: independentRows)
-        // One row takes the singleton FP16-reuse path; three rows take the
-        // batched path, or the independent-rows path with `independentRows`.
+        // One row takes the singleton FP16-reuse path and three rows the
+        // per-row path; sixteen rows take the batched path, or the per-row
+        // path with `independentRows`.
         let singleton = MLXArray.ones([1, 1024], dtype: .float32)
         let input = MLXArray.ones([3, 1024], dtype: .float32)
-        eval(layer(singleton), layer(input))
+        let wide = MLXArray.ones([16, 1024], dtype: .float32)
+        eval(layer(singleton), layer(input), layer(wide))
         let compiled = compile(inputs: [layer]) { (x: MLXArray) in layer(x) }
         for multiplier in [Float(1), 2] {
             layer.update(
                 parameters: ModuleParameters.unflattened([
                     ("scales", (layer.scales * multiplier).asType(.float16))
                 ]))
-            for x in [singleton, input] {
+            for x in [singleton, input, wide] {
                 XCTAssertEqual(
                     compiled(x).asData(access: .copy).data,
                     reference(layer, x).asData(access: .copy).data)
@@ -218,9 +224,11 @@ final class Float16ConstantCastTests: XCTestCase {
             try self.layer(block: 128, independentRows: independentRows),
         ] {
             XCTAssertFalse(other.permitsFloat16ConstantReuse)
-            XCTAssertEqual(
-                other(input).asData(access: .copy).data,
-                reference(other, input).asData(access: .copy).data)
+            for x in [input, wide] {
+                XCTAssertEqual(
+                    other(x).asData(access: .copy).data,
+                    reference(other, x).asData(access: .copy).data)
+            }
         }
     }
 }

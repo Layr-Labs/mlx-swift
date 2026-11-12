@@ -366,7 +366,11 @@ jobs:
         run: |
           set -o pipefail
           cap_log="$RESULTS/cap.log"
-          swift test --build-system native --skip-build --enable-code-coverage --disable-swift-testing --filter ProcessAllocationCapTests 2>&1 | tee "$cap_log"
+          # swift test prints the test output on stdout and its own diagnostics on stderr. Swift 6.4 warns on stderr that
+          # --build-system native is deprecated, at the same time as the test output. The test logs keep only stdout, so
+          # the warning cannot split a result line. The job log and swiftpm-stderr.log keep stderr.
+          swift test --build-system native --skip-build --enable-code-coverage --disable-swift-testing --filter ProcessAllocationCapTests \
+            2> >(tee -a "$RESULTS/swiftpm-stderr.log" >&2) | tee "$cap_log"
           cp "$BIN/codecov/default.profdata" "$RESULTS/cap.profdata"
           if ! grep -Eq "^Test Case '.*ProcessAllocationCapTests testFreshProcessSwiftCap]' passed \(" "$cap_log" ||
              grep -Eq "^Test Case '.*' (failed|skipped) \(" "$cap_log"; then
@@ -415,7 +419,9 @@ jobs:
           set -o pipefail
           log="$RESULTS/xctest.log"
           filter=$(cat "$PLAN/shard-$SHARD.regex")
-          swift test --build-system native --skip-build --enable-code-coverage --disable-swift-testing --filter "$filter" 2>&1 | tee "$log"
+          # As in the cap step: the log keeps only the test output on stdout.
+          swift test --build-system native --skip-build --enable-code-coverage --disable-swift-testing --filter "$filter" \
+            2> >(tee -a "$RESULTS/swiftpm-stderr.log" >&2) | tee "$log"
           cp "$BIN/codecov/default.profdata" "$RESULTS/xctest.profdata"
           # XCTest prints a summary line for each suite. The last line covers the whole run.
           summary=$(grep -E 'Executed [0-9]+ tests?, with' "$log" | tail -n 1 || true)
@@ -443,7 +449,9 @@ jobs:
         run: |
           set -o pipefail
           log="$RESULTS/swift-testing.log"
-          swift test --build-system native --skip-build --enable-code-coverage --disable-xctest 2>&1 | tee "$log"
+          # As in the cap step: the log keeps only the test output on stdout.
+          swift test --build-system native --skip-build --enable-code-coverage --disable-xctest \
+            2> >(tee -a "$RESULTS/swiftpm-stderr.log" >&2) | tee "$log"
           cp "$BIN/codecov/default.profdata" "$RESULTS/swift-testing.profdata"
           summary=$(grep -E 'Test run with [0-9]+ tests?' "$log" | tail -n 1 || true)
           echo "Shard $SHARD Swift Testing summary: $summary" >> "$GITHUB_STEP_SUMMARY"

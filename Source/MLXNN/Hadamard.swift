@@ -179,6 +179,15 @@ public struct HadamardGDNLayout {
 public final class HadamardQuantizedLinear: QuantizedLinear {
     public let transform: SignedBlockHadamard
     public let gdnLayout: HadamardGDNLayout?
+    /// Whether FP32 input of more than one row to the 2-bit/group128/block1024
+    /// profile with FP16 scales runs each row through the single-row (M=1)
+    /// kernel, giving the bytes of separate singleton calls on every chip.
+    /// A caller whose machines must agree byte for byte (the stages of a
+    /// pair) asks for it. Off by default: such input takes the batched matrix
+    /// kernel (TF32 on M5, FP32 elsewhere), several times faster for prompts
+    /// but not the singleton bytes. Other profiles and singleton calls are
+    /// the same either way.
+    public let independentRows: Bool
     private static let reuseFloat16Constants = float16ConstantReuseEnabled(
         environmentValue: ProcessInfo.processInfo.environment[
             "DARKBLOOM_BONSAI_F16_CONSTANT_CACHE"])
@@ -193,14 +202,19 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
     /// or packed-matmul kernel. The process-wide generic cache kill switch also
     /// remains effective. No cached arrays enter the module parameter tree.
     var permitsFloat16ConstantReuse: Bool {
-        Self.reuseFloat16Constants && bits == 2 && groupSize == 128
-            && transform.blockSize == 1024 && scales.dtype == .float16
+        Self.reuseFloat16Constants && isBlock1024Profile
+    }
+
+    /// Bonsai's signed block1024/affine2 pack with stored FP16 scales.
+    private var isBlock1024Profile: Bool {
+        bits == 2 && groupSize == 128 && transform.blockSize == 1024
+            && scales.dtype == .float16
     }
 
     public init(
         weight: MLXArray, bias: MLXArray? = nil, scales: MLXArray, biases: MLXArray?,
         groupSize: Int, bits: Int, transform: SignedBlockHadamard,
-        gdnLayout: HadamardGDNLayout? = nil
+        gdnLayout: HadamardGDNLayout? = nil, independentRows: Bool = false
     ) throws {
         try validateHadamardWeights(
             weight, scales: scales, biases: biases,
@@ -217,6 +231,7 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
         }
         self.gdnLayout = gdnLayout
         self.transform = transform
+        self.independentRows = independentRows
         super.init(
             weight: weight, bias: bias, scales: scales, biases: biases,
             groupSize: groupSize, bits: bits)
@@ -225,13 +240,12 @@ public final class HadamardQuantizedLinear: QuantizedLinear {
 
     public override func callAsFunction(_ x: MLXArray) -> MLXArray {
         let rotated = transform(gdnLayout.map { $0(x) } ?? x)
-        // Bonsai's signed block1024/affine2 pack advertises FP32 arithmetic.
-        // Multi-row projections must not enter the architecture-dependent
-        // TF32 matrix kernel. Preserve the scalar packed reduction per row;
-        // singleton decode and every other Hadamard policy stay unchanged.
-        if rotated.dtype == .float32, rotated.ndim >= 2,
-            rotated.size / transform.width > 1, bits == 2, groupSize == 128,
-            transform.blockSize == 1024, scales.dtype == .float16
+        // Only a caller that asked for `independentRows` keeps multi-row FP32
+        // projections out of the architecture-dependent TF32 matrix kernel,
+        // with the scalar packed reduction per row. Singleton decode and
+        // every other Hadamard policy take the paths below either way.
+        if independentRows, isBlock1024Profile, rotated.dtype == .float32,
+            rotated.ndim >= 2, rotated.size / transform.width > 1
         {
             return constantCachedForward(
                 rotated, allowFloat16: permitsFloat16ConstantReuse,

@@ -195,6 +195,46 @@ class HadamardLayerTests: XCTestCase {
         }
     }
 
+    /// A single Mac's decode step carries one position per request, `[B, 1, H]`.
+    /// Its rows take the per-row path at every B, so each request computes the
+    /// bytes it computes decoding alone, whatever decodes beside it.
+    func testSingleMacDecodeRowsMatchSingletonPackedArithmetic() throws {
+        let fixture = try BonsaiRowsFixture()
+        for layout in [nil, fixture.grouped] {
+            let layer = try fixture.layer(layout: layout)
+            XCTAssertFalse(layer.independentRows)
+            for rows in [2, 4, 8, 16, 24] {
+                let input = fixture.input([rows, 1, fixture.width])
+                XCTAssertEqual(
+                    fixture.bytes(layer(input)), fixture.bytes(fixture.singletons(layer, input)),
+                    "decode rows \(rows)")
+            }
+        }
+    }
+
+    /// A single Mac's prompt call with fewer rows than the threshold takes the
+    /// per-row path; from the threshold on it takes one batched packed matmul.
+    func testSingleMacPromptRowsBatchFromTheThreshold() throws {
+        let fixture = try BonsaiRowsFixture()
+        let threshold = 12
+        for layout in [nil, fixture.grouped] {
+            let layer = try fixture.layer(layout: layout)
+            for rows in [2, threshold - 1] {
+                let input = fixture.input([1, rows, fixture.width])
+                XCTAssertEqual(
+                    fixture.bytes(layer(input)), fixture.bytes(fixture.singletons(layer, input)),
+                    "prompt rows \(rows)")
+            }
+            for rows in [threshold, threshold + 1, 512] {
+                let input = fixture.input([1, rows, fixture.width])
+                XCTAssertEqual(
+                    fixture.bytes(layer(input)),
+                    fixture.bytes(fixture.batched(input, layout: layout)),
+                    "prompt rows \(rows)")
+            }
+        }
+    }
+
     func testConfigurationValidation() throws {
         var metadata: [String: Any] = [
             "prism.hadamard.version": 1,
@@ -294,4 +334,57 @@ class HadamardLayerTests: XCTestCase {
             XCTAssertLessThan(relative.item(Float.self), 1e-4)
         }
     }
+}
+
+/// Bonsai 27B's block1024/affine2 profile with FP16 scales and a bias, 4,352
+/// outputs wide (above 4,096, so MLX's vector limit is the one its wide
+/// projections meet), and its two oracles: separate singleton calls, and one
+/// `quantizedMM` over every row with the exactly widened FP32 constants.
+private struct BonsaiRowsFixture {
+    let width = 1024
+    let outputs = 4352
+    let transform: SignedBlockHadamard
+    let grouped: HadamardGDNLayout
+    let weight: MLXArray
+    let scales: MLXArray
+    let biases: MLXArray?
+    let bias: MLXArray
+
+    init() throws {
+        // Named [Float] values keep the MLXArray initializer overloads cheap to type-check.
+        let signs: [Float] = (0 ..< 1024).map { $0 % 3 == 0 ? -1 : 1 }
+        transform = try SignedBlockHadamard(blockSize: 1024, signs: signs)
+        grouped = try HadamardGDNLayout(width: 1024, keyHeads: 2, valueHeads: 4)
+        let values: [Float] = (0 ..< 4352 * 1024).map { Float(($0 * 13) % 127 - 63) / 63 }
+        let original = MLXArray(values, [4352, 1024]).asType(.float16)
+        (weight, scales, biases) = quantized(original, groupSize: 128, bits: 2)
+        bias = (MLXArray(0 ..< 4352).asType(.float32) / 1000).asType(.float16)
+    }
+
+    /// The single-Mac loader's call: no `independentRows` argument.
+    func layer(layout: HadamardGDNLayout?) throws -> HadamardQuantizedLinear {
+        try HadamardQuantizedLinear(
+            weight: weight, bias: bias, scales: scales, biases: biases,
+            groupSize: 128, bits: 2, transform: transform, gdnLayout: layout)
+    }
+
+    func input(_ shape: [Int]) -> MLXArray {
+        let values: [Float] = (0 ..< shape.reduce(1, *)).map { Float(($0 * 29) % 251 - 125) / 127 }
+        return MLXArray(values, shape)
+    }
+
+    func singletons(_ layer: HadamardQuantizedLinear, _ input: MLXArray) -> MLXArray {
+        let flat = input.reshaped([-1, width])
+        return concatenated((0 ..< flat.dim(0)).map { layer(flat[$0 ..< ($0 + 1)]) }, axis: 0)
+            .reshaped(Array(input.shape.dropLast()) + [outputs])
+    }
+
+    func batched(_ input: MLXArray, layout: HadamardGDNLayout?) -> MLXArray {
+        quantizedMM(
+            transform(layout.map { $0(input) } ?? input), weight,
+            scales: scales.asType(.float32), biases: biases?.asType(.float32),
+            transpose: true, groupSize: 128, bits: 2) + bias.asType(.float32)
+    }
+
+    func bytes(_ array: MLXArray) -> Data { array.asData(access: .copy).data }
 }

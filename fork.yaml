@@ -388,7 +388,19 @@ def:
         a missing executable or profile before reporting instrumented Swift code.
         CONTRIBUTING.md documents the full-FP32 test contract and the required
         fresh-process allocation-cap check, distinct from the ordinary test pass.
+
+        The disabled native CodeQL workflow scans Actions, C/C++, JavaScript/TypeScript
+        and Python with the pinned CodeQL 2.27.4 ARM64 bundle and their existing
+        default suites. It requires `CODEQL_NATIVE=on` after an operator switches
+        default setup to advanced setup. The separate GitHub-hosted publisher
+        validates the same run's four fingerprinted SARIF files, then uploads
+        the original categories without checking out or executing repository code.
+        `docs/ci-codeql-native.md` records activation and rollback gates.
       globs:
+        - ".github/scripts/codeql_artifacts.py"
+        - ".github/scripts/codeql_artifacts_test.py"
+        - ".github/workflows/codeql-native.yml"
+        - "docs/ci-codeql-native.md"
         - "scripts/check_forkdiff.py"
         - "scripts/check-generated-metal-sources.py"
         - "scripts/test-check-generated-metal-sources.py"

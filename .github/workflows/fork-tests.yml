@@ -1,616 +1,83 @@
-name: Fork Tests
-
-# Build the fork and run its tests with Xcode 27.2 on macOS runners: a Darkbloom Sandbox when the route job gets one,
-# otherwise the GitHub-hosted xcode-27 image.
-#
-# The jobs:
-#   shards         Reads the shard count, which the route job and the test matrix need.
-#   route          Asks Darkbloom for the runners of the macOS jobs (darkbloom-route.yml). They fall back to xcode-27.
-#   build          Builds the package and its tests one time.
-#   metallib       Builds the full Metal library, or restores it from the cache. It runs at the same time as build.
-#   test           One job for each shard. Each shard lists the tests, plans the shards and runs its part of the tests.
-#   build-and-test Checks that every listed test ran exactly once, and reports line coverage.
-#
-# .github/scripts/test-shards.json has the measured test durations and the shard count.
+# Temporary manual-only compatibility canary. Never merge this workflow replacement.
+name: CodeQL four-language native canary (never merge)
 
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
-
-concurrency:
-  group: fork-tests-${{ github.ref }}
-  # On a pull request, a new run cancels the older run.
-  # On main, a new run does not stop a run that has started. It can replace a run that still waits in the queue.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
-env:
-  # FP32 reference tests require full products on TF32-capable GPUs.
-  MLX_ENABLE_TF32: "0"
-
-defaults:
-  run:
-    shell: bash
-
 jobs:
-  shards:
-    name: Read the shard count
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      shards: ${{ steps.plan.outputs.shards }}
-      macos-jobs: ${{ steps.plan.outputs.macos-jobs }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          sparse-checkout: .github/scripts/test-shards.json
-          sparse-checkout-cone-mode: false
-
-      - name: Read the shard count
-        # The macOS jobs are build, metallib, build-and-test and one test job per shard. The route asks for that many.
-        id: plan
-        run: |
-          count=$(python3 -c 'import json; print(json.load(open(".github/scripts/test-shards.json"))["shards"])')
-          echo "macos-jobs=$(( count + 3 ))" >> "$GITHUB_OUTPUT"
-          echo "shards=$(python3 -c "import json; print(json.dumps(list(range(1, $count + 1))))")" >> "$GITHUB_OUTPUT"
-
-  # The test products hold the build's absolute workspace path and its Xcode, so the test jobs must run on the same
-  # kind of runner as the build. The macOS jobs therefore share one lane, which the plane grants whole or not at all.
   route:
-    needs: shards
     uses: ./.github/workflows/darkbloom-route.yml
     permissions: {}
     with:
       lanes: |
-        fork-tests macos_arm64 xcode-27 ${{ needs.shards.outputs.macos-jobs }}
+        codeql-canary linux_arm64 ubuntu-22.04
 
-  build:
-    name: Build the package and its tests
+  scan:
     needs: route
-    runs-on: ${{ fromJSON(needs.route.outputs.routes)['fork-tests'] }}
-    timeout-minutes: 60
-    outputs:
-      bin: ${{ steps.pack.outputs.bin }}
+    runs-on: ${{ fromJSON(needs.route.outputs.routes)['codeql-canary'] }}
+    timeout-minutes: 45
     steps:
-      # A Darkbloom Sandbox without a Darkbloom cache must not reach GitHub's Actions cache, so there every cache step is skipped.
-      - name: Choose this job's Actions cache
-        run: |
-          if [[ ${RUNNER_NAME:-} != darkbloom-* ]]; then
-            echo "Actions cache: this runner's own"
-          elif [[ -n ${DARKBLOOM_CACHE_URL:-} ]]; then
-            echo "Actions cache: the Darkbloom cache at $DARKBLOOM_CACHE_URL"
-          else
-            echo "CI_ACTIONS_CACHE=off" >> "$GITHUB_ENV"
-            echo "::notice title=Actions cache::The plane gave this Darkbloom Sandbox no cache, so every cache step is skipped."
-          fi
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          submodules: recursive
-
-      - name: Check generated quantized Metal sources
-        run: |
-          python3 scripts/test-check-generated-metal-sources.py
-          python3 scripts/check-generated-metal-sources.py
-
-      - name: Select Xcode 27.2
-        id: xcode
-        uses: ./.github/actions/select-xcode
-
-      - name: Install ccache and read the submodule pins
-        id: pins
-        # SwiftPM compiles the Cmlx C and C++ core with the compiler in CC. A wrapper sends each compile through ccache.
-        # Without ccache, and when Homebrew is missing or cannot install it, the wrapper runs clang alone.
-        run: |
-          if ! command -v ccache > /dev/null && command -v brew > /dev/null; then
-            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install ccache ||
-              echo "::warning title=No ccache::brew install ccache failed. The C and C++ files build without ccache."
-          fi
-          mkdir -p "$RUNNER_TEMP/ccache-bin"
-          if command -v ccache > /dev/null; then
-            ccache --version | head -n 1
-            printf '#!/bin/sh\nexec ccache %s "$@"\n' "$(xcrun -f clang)" > "$RUNNER_TEMP/ccache-bin/clang"
-          else
-            command -v brew > /dev/null || echo "::warning title=No ccache::This runner has no ccache and no Homebrew. The C and C++ files build without ccache."
-            printf '#!/bin/sh\nexec %s "$@"\n' "$(xcrun -f clang)" > "$RUNNER_TEMP/ccache-bin/clang"
-          fi
-          chmod +x "$RUNNER_TEMP/ccache-bin/clang"
-          cat "$RUNNER_TEMP/ccache-bin/clang"
-          echo "mlx=$(git rev-parse HEAD:Source/Cmlx/mlx)" >> "$GITHUB_OUTPUT"
-          echo "mlxc=$(git rev-parse HEAD:Source/Cmlx/mlx-c)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the build cache
-        # The key has the Xcode version, the two submodule pins and a hash of Package.swift and Source.
-        # On a miss, the newest cache with the same Xcode version and pins is restored, then the newest with the same Xcode version.
-        # ccache finds each object by a hash of its compile, so an older cache gives correct objects for the files that did not change.
-        id: cache
-        if: env.CI_ACTIONS_CACHE != 'off'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/Library/org.swift.swiftpm
-            ${{ runner.temp }}/ccache
-          key: ${{ runner.os }}-build-xcode-${{ steps.xcode.outputs.version }}-mlx-${{ steps.pins.outputs.mlx }}-mlxc-${{ steps.pins.outputs.mlxc }}-${{ hashFiles('Package.swift', 'Source/**', '!Source/Cmlx/mlx/**', '!Source/Cmlx/mlx-c/**') }}
-          restore-keys: |
-            ${{ runner.os }}-build-xcode-${{ steps.xcode.outputs.version }}-mlx-${{ steps.pins.outputs.mlx }}-mlxc-${{ steps.pins.outputs.mlxc }}-
-            ${{ runner.os }}-build-xcode-${{ steps.xcode.outputs.version }}-
-
-      - name: Build the package and its tests
+      - name: Require a native canary runner
         env:
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
-          CACHE_KEY: ${{ steps.cache.outputs.cache-matched-key }}
-          CC: ${{ runner.temp }}/ccache-bin/clang
-          CCACHE_DIR: ${{ runner.temp }}/ccache
-          CCACHE_COMPILERCHECK: content
-          CCACHE_SLOPPINESS: modules,include_file_mtime,include_file_ctime,time_macros,pch_defines,clang_index_store
-          CCACHE_MAXSIZE: 2G
+          NATIVE_RUNNER: ${{ runner.name }}
         run: |
-          if command -v ccache > /dev/null; then ccache --zero-stats > /dev/null; fi
-          start=$(date +%s)
-          # Swift 6.4 builds with Swift Build by default. Every SwiftPM call in this workflow uses the native build system,
-          # so --skip-build and --show-bin-path find these products.
-          swift build --build-system native --build-tests --enable-code-coverage --disable-index-store
-          seconds=$(( $(date +%s) - start ))
-          echo "swift build --build-tests --enable-code-coverage took $(( seconds / 60 )) min $(( seconds % 60 )) s."
-          {
-            echo "Build wall time: $(( seconds / 60 )) min $(( seconds % 60 )) s."
-            echo "Build cache: exact hit ${CACHE_HIT:-false}, restored key \`${CACHE_KEY:-none}\`."
-          } >> "$GITHUB_STEP_SUMMARY"
-          if command -v ccache > /dev/null; then
-            ccache --show-stats --verbose
-            # Keep only the objects that this build used, so the cache does not grow.
-            ccache --evict-older-than "$(( $(date +%s) - start + 60 ))s"
-            ccache --show-stats | grep -Ei 'hits|misses|cache size' || true
-            hits=$(ccache --print-stats | awk '$1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { n += $2 } END { print n + 0 }')
-            misses=$(ccache --print-stats | awk '$1 == "cache_miss" { print $2 }')
-            echo "ccache: $hits hits, ${misses:-0} misses, $(du -sh "$CCACHE_DIR" | cut -f1) on disk." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Save the build cache
-        # Save on main and on the pull request. A pull request can read the caches of main and of its own branch.
-        if: env.CI_ACTIONS_CACHE != 'off' && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+          [[ "$NATIVE_RUNNER" == darkbloom-* ]]
+          [[ "$(uname -s)" == Linux && "$(uname -m)" == aarch64 ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/Library/org.swift.swiftpm
-            ${{ runner.temp }}/ccache
-          key: ${{ steps.cache.outputs.cache-primary-key }}
-
-      - name: Pack the test products
-        # The tests need the test bundle, the package state and the dependency checkouts. The object files and executables stay behind.
-        id: pack
+          ref: 4cc6cf36336272ba487f86d34826280275983195
+          persist-credentials: false
+      - name: Download the pinned ARM64 CodeQL bundle
         run: |
-          bin=$(swift build --build-system native --show-bin-path)
-          rel=${bin#"$GITHUB_WORKSPACE/"}
-          echo "bin=$rel" >> "$GITHUB_OUTPUT"
-          du -sh .build/* "$rel"/* 2>/dev/null | sort -h | tail -n 20
-          excludes=(--exclude ".build/repositories" --exclude "$rel/*.build" --exclude "$rel/ModuleCache" --exclude "$rel/index")
-          while IFS= read -r exe; do
-            excludes+=(--exclude "$exe" --exclude "$exe.dSYM")
-          done < <(find "$rel" -maxdepth 1 -type f -perm -u+x)
-          mkdir -p "$RUNNER_TEMP/test-products"
-          start=$(date +%s)
-          tar -cf "$RUNNER_TEMP/test-products/test-products.tar" "${excludes[@]}" .build Package.resolved
-          echo "tar took $(( $(date +%s) - start )) s."
-          ls -l "$RUNNER_TEMP/test-products/test-products.tar"
-          tar -tf "$RUNNER_TEMP/test-products/test-products.tar" | grep -E '\.xctest/Contents/MacOS/[^/]+$'
-          echo "Test products: $(du -h "$RUNNER_TEMP/test-products/test-products.tar" | cut -f1) before compression." >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the test products
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: test-products
-          path: ${{ runner.temp }}/test-products/test-products.tar
-          compression-level: 1
-          retention-days: 1
-          overwrite: true
-
-  metallib:
-    name: Build the full Metal library
-    needs: route
-    runs-on: ${{ fromJSON(needs.route.outputs.routes)['fork-tests'] }}
-    timeout-minutes: 60
-    steps:
-      # As in build: skip every cache step on a Darkbloom Sandbox that the plane gave no Darkbloom cache.
-      - name: Choose this job's Actions cache
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl --fail --location --proto '=https' --proto-redir '=https' \
+            --output codeql.tar.zst \
+            https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.4/codeql-bundle-linux-arm64.tar.zst
+          echo '1c015b411c6e1c7f7e767eb8c9408fc6a2012d24d78b177cf22f29edc5772d10  codeql.tar.zst' | sha256sum --check
+          tar --zstd -xf codeql.tar.zst
+          "$RUNNER_TEMP/codeql/codeql" version --format=json
+          "$RUNNER_TEMP/codeql/codeql" resolve languages
+      - name: Scan with the current default language suites
         run: |
-          if [[ ${RUNNER_NAME:-} != darkbloom-* ]]; then
-            echo "Actions cache: this runner's own"
-          elif [[ -n ${DARKBLOOM_CACHE_URL:-} ]]; then
-            echo "Actions cache: the Darkbloom cache at $DARKBLOOM_CACHE_URL"
-          else
-            echo "CI_ACTIONS_CACHE=off" >> "$GITHUB_ENV"
-            echo "::notice title=Actions cache::The plane gave this Darkbloom Sandbox no cache, so every cache step is skipped."
-          fi
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Select Xcode 27.2
-        id: xcode
-        uses: ./.github/actions/select-xcode
-
-      - name: Read the mlx pin
-        id: pin
-        run: echo "mlx=$(git rev-parse HEAD:Source/Cmlx/mlx)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the Metal library
-        # The library depends only on the mlx submodule, the Metal compiler and the build script.
-        # The key also has the generated Metal sources, which change only with the mlx pin.
-        id: cache
-        if: env.CI_ACTIONS_CACHE != 'off'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build/metallib-cache
-          key: ${{ runner.os }}-metallib-xcode-${{ steps.xcode.outputs.version }}-mlx-${{ steps.pin.outputs.mlx }}-${{ hashFiles('scripts/build-metallib.sh', 'Source/Cmlx/mlx-generated/**') }}
-
-      - name: Build the full Metal library
-        # A SwiftPM command-line build compiles no Metal kernels, so the tests find no metallib.
-        # Xcode 27 can ship without the Metal toolchain component, so the step downloads it when the metal compiler does
-        # not run. Apple's catalog fetch fails at times, so it tries 3 times.
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          if ! xcrun --no-cache -sdk macosx metal --version; then
-            for attempt in 1 2 3; do
-              xcodebuild -downloadComponent MetalToolchain && break
-              [ "$attempt" = 3 ] || sleep 20
-            done
-            xcrun --no-cache -sdk macosx metal --version
-          fi
-          git submodule update --init --depth 1 Source/Cmlx/mlx
-          start=$(date +%s)
-          scripts/build-metallib.sh build build/metallib-cache/mlx.metallib
-          seconds=$(( $(date +%s) - start ))
-          echo "Metal library build: $(( seconds / 60 )) min $(( seconds % 60 )) s." >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Save the Metal library
-        if: env.CI_ACTIONS_CACHE != 'off' && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build/metallib-cache
-          key: ${{ steps.cache.outputs.cache-primary-key }}
-
-      - name: Report the Metal library
-        env:
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
-        run: |
-          ls -l build/metallib-cache/mlx.metallib
-          echo "Metal library: $(du -h build/metallib-cache/mlx.metallib | cut -f1). Cache hit: ${CACHE_HIT:-false}." >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the Metal library
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: metallib
-          path: build/metallib-cache/mlx.metallib
-          retention-days: 1
-          overwrite: true
-
-  test:
-    name: Test shard ${{ matrix.shard }}
-    needs: [shards, route, build, metallib]
-    runs-on: ${{ fromJSON(needs.route.outputs.routes)['fork-tests'] }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ${{ fromJSON(needs.shards.outputs.shards) }}
-    env:
-      BIN: ${{ needs.build.outputs.bin }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # swift test reads the package manifest, and the Cmlx target lists files in the submodules.
-          submodules: recursive
-
-      - name: Select Xcode 27.2
-        uses: ./.github/actions/select-xcode
-
-      - name: Download the test products
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: test-products
-          path: ${{ runner.temp }}/test-products
-
-      - name: Download the Metal library
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: metallib
-          path: ${{ runner.temp }}/metallib
-
-      - name: Unpack the test products
-        run: |
-          start=$(date +%s)
-          tar -xf "$RUNNER_TEMP/test-products/test-products.tar"
-          echo "tar took $(( $(date +%s) - start )) s."
-          scripts/build-metallib.sh install "$RUNNER_TEMP/metallib/mlx.metallib"
-          echo "RESULTS=$RUNNER_TEMP/test-results" >> "$GITHUB_ENV"
-          echo "PLAN=$RUNNER_TEMP/test-results/plan" >> "$GITHUB_ENV"
-
-      - name: List the tests and plan the shards
-        # Each shard lists the tests and makes the same plan, because the plan depends only on the list and test-shards.json.
-        # The guard: this step fails if a listed test is in no shard or in two shards.
-        # The final job checks that all shards made the same plan.
-        id: plan
-        env:
-          SHARD: ${{ matrix.shard }}
-        run: |
-          set -o pipefail
-          mkdir -p "$PLAN"
-          # Listing loads the test bundle, so it needs the Metal library in the bundle.
-          swift test list --build-system native --skip-build --disable-swift-testing > "$RUNNER_TEMP/xctest-list.txt"
-          swift test list --build-system native --skip-build --disable-xctest > "$RUNNER_TEMP/swift-testing-list.txt"
-          echo "XCTest: $(wc -l < "$RUNNER_TEMP/xctest-list.txt") lines. Swift Testing: $(wc -l < "$RUNNER_TEMP/swift-testing-list.txt") lines."
-          python3 .github/scripts/test-shards.py plan --config .github/scripts/test-shards.json \
-            --xctest "$RUNNER_TEMP/xctest-list.txt" --swift-testing "$RUNNER_TEMP/swift-testing-list.txt" --out "$PLAN" \
-            --summary-shard "$SHARD"
-          plan="$PLAN/shard-$SHARD.json"
-          cat "$plan"
-          python3 - "$plan" >> "$GITHUB_OUTPUT" <<'EOF'
-          import json, sys
-          shard = json.load(open(sys.argv[1]))
-          print(f"isolated={str(shard['isolated']).lower()}")
-          print(f"swift_testing={str(shard['swift_testing']).lower()}")
-          print(f"xctest={'true' if shard['xctest'] else 'false'}")
-          EOF
-
-      - name: Run allocation-cap test in a fresh process
-        if: steps.plan.outputs.isolated == 'true'
-        env:
-          MLX_TEST_PROCESS_CAP: "1"
-        run: |
-          set -o pipefail
-          cap_log="$RESULTS/cap.log"
-          # swift test prints the test output on stdout and its own diagnostics on stderr. Swift 6.4 warns on stderr that
-          # --build-system native is deprecated, at the same time as the test output. The test logs keep only stdout, so
-          # the warning cannot split a result line. The job log and swiftpm-stderr.log keep stderr.
-          swift test --build-system native --skip-build --enable-code-coverage --disable-swift-testing --filter ProcessAllocationCapTests \
-            2> >(tee -a "$RESULTS/swiftpm-stderr.log" >&2) | tee "$cap_log"
-          cp "$BIN/codecov/default.profdata" "$RESULTS/cap.profdata"
-          if ! grep -Eq "^Test Case '.*ProcessAllocationCapTests testFreshProcessSwiftCap]' passed \(" "$cap_log" ||
-             grep -Eq "^Test Case '.*' (failed|skipped) \(" "$cap_log"; then
-            echo "::error::The fresh-process allocation-cap test must execute and pass without skips."
-            exit 1
-          fi
-
-      - name: Run the multi-process distributed tests
-        # Each ring class forms one group per process, so each class runs in its own xctest process.
-        # The harness starts the other ranks again from the same test bundle.
-        if: steps.plan.outputs.isolated == 'true'
-        env:
-          MLX_TEST_DISTRIBUTED: "1"
-        run: |
-          set -o pipefail
-          bundle="$BIN/mlx-swiftPackageTests.xctest"
-          if [ ! -d "$bundle" ]; then
-            bundle="$BIN/MLXTests.xctest"
-          fi
-          if [ ! -d "$bundle" ]; then
-            echo "::error::No test bundle under $BIN."
-            exit 1
-          fi
-          for suite in DistributedRingTests DistributedNNRingTests; do
-            log="$RESULTS/ring-$suite.log"
-            xcrun xctest -XCTest "$suite" "$bundle" 2>&1 | tee "$log"
-            if ! grep -Eq "^Test Suite '$suite' passed" "$log" ||
-               grep -Eq "^Test Case '.*' (failed|skipped) \(" "$log"; then
-              echo "::error::$suite must execute and pass without skips."
-              exit 1
-            fi
+          set -euo pipefail
+          codeql="$RUNNER_TEMP/codeql/codeql"
+          mkdir "$RUNNER_TEMP/codeql-dbs" "$RUNNER_TEMP/codeql-results"
+          for language in actions cpp javascript python; do
+            case "$language" in
+              cpp) category=/language:c-cpp ;;
+              javascript) category=/language:javascript-typescript ;;
+              *) category=/language:$language ;;
+            esac
+            "$codeql" database create "$RUNNER_TEMP/codeql-dbs/$language" \
+              --source-root="$GITHUB_WORKSPACE" --language="$language" \
+              --build-mode=none --threads=4 --ram=8192
+            "$codeql" database analyze "$RUNNER_TEMP/codeql-dbs/$language" \
+              --sarif-category="$category" --format=sarifv2.1.0 --output="$RUNNER_TEMP/codeql-results/$language.sarif" \
+              --threads=4 --ram=8192
           done
-
-      - name: Run the XCTest tests of this shard
-        if: steps.plan.outputs.xctest == 'true'
-        env:
-          SHARD: ${{ matrix.shard }}
-          # MLX reads this flag once, when it opens the Metal device. It turns on the sorted expert-tile route for the whole test run.
-          # Today only the allow-listed shapes in SortedGatherQuantizedMMTests take that route.
-          # Without the flag, five tests in that suite skip.
-          MLX_GATHER_QMM_EXPERT_SLICES: "1"
-          # Exercise count-based trimming without allocating terabytes of host
-          # input over the OS-default resource-count stress loop.
-          MLX_RESOURCE_LIMIT: "50000"
-        run: |
-          set -o pipefail
-          log="$RESULTS/xctest.log"
-          filter=$(cat "$PLAN/shard-$SHARD.regex")
-          # As in the cap step: the log keeps only the test output on stdout.
-          swift test --build-system native --skip-build --enable-code-coverage --disable-swift-testing --filter "$filter" \
-            2> >(tee -a "$RESULTS/swiftpm-stderr.log" >&2) | tee "$log"
-          cp "$BIN/codecov/default.profdata" "$RESULTS/xctest.profdata"
-          # XCTest prints a summary line for each suite. The last line covers the whole run.
-          summary=$(grep -E 'Executed [0-9]+ tests?, with' "$log" | tail -n 1 || true)
-          echo "Shard $SHARD XCTest summary: $summary" >> "$GITHUB_STEP_SUMMARY"
-          if ! echo "$summary" | grep -Eq 'Executed [1-9][0-9]* tests?, with'; then
-            echo "::error::The test run executed zero tests."
-            exit 1
-          fi
-          # The cap test and the ring tests ran in their own processes. Only the opt-in perf test and
-          # the AOT-only retract test on NAX hardware may skip here.
-          unexpected=$(grep -E "^Test Case '.*' skipped \(" "$log" | grep -Ev "^Test Case '-\[[^.]+\.(QwenExpertTilePerfTests testQwenRoutedPrefillUnitTimings|SortedGatherQuantizedMMTests testQwenSortednessViolationRetractsToLegacyRoute)\]' skipped \(" || true)
-          if [ -n "$unexpected" ]; then
-            echo "::error::Unexpected skipped tests:"
-            echo "$unexpected"
-            exit 1
-          fi
-
-      - name: Run the Swift Testing tests
-        # Swift Testing runs its tests in parallel in one process, so all of them run in one shard.
-        if: steps.plan.outputs.swift_testing == 'true'
-        env:
-          SHARD: ${{ matrix.shard }}
-          MLX_GATHER_QMM_EXPERT_SLICES: "1"
-          MLX_RESOURCE_LIMIT: "50000"
-        run: |
-          set -o pipefail
-          log="$RESULTS/swift-testing.log"
-          # As in the cap step: the log keeps only the test output on stdout.
-          swift test --build-system native --skip-build --enable-code-coverage --disable-xctest \
-            2> >(tee -a "$RESULTS/swiftpm-stderr.log" >&2) | tee "$log"
-          cp "$BIN/codecov/default.profdata" "$RESULTS/swift-testing.profdata"
-          summary=$(grep -E 'Test run with [0-9]+ tests?' "$log" | tail -n 1 || true)
-          echo "Shard $SHARD Swift Testing summary: $summary" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the shard results
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'codeql-results'
+          result = {'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(), 'languages': {}}
+          categories = {'actions': '/language:actions', 'cpp': '/language:c-cpp', 'javascript': '/language:javascript-typescript', 'python': '/language:python'}
+          for language in categories:
+              data = json.loads((root / f'{language}.sarif').read_text())
+              assert data['version'] == '2.1.0' and data['runs'], language
+              assert all(run['automationDetails']['id'] == categories[language] + '/' for run in data['runs']), language
+              rules = [rule for run in data['runs'] for rule in run['tool']['driver'].get('rules', [])]
+              assert rules, language
+              result['languages'][language] = {'category': categories[language], 'rules': len(rules), 'findings': sum(len(run.get('results', [])) for run in data['runs'])}
+          (root / 'summary.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+      - name: Keep canary results without publishing security alerts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: test-results-${{ matrix.shard }}
-          path: ${{ runner.temp }}/test-results
-          retention-days: 7
-          overwrite: true
-
-  build-and-test:
-    # This job keeps the check name of the old single job.
-    name: build-and-test
-    needs: [route, build, metallib, test]
-    if: ${{ !cancelled() }}
-    runs-on: ${{ fromJSON(needs.route.outputs.routes)['fork-tests'] }}
-    timeout-minutes: 20
-    steps:
-      - name: Check the results of the other jobs
-        env:
-          BUILD: ${{ needs.build.result }}
-          METALLIB: ${{ needs.metallib.result }}
-          TEST: ${{ needs.test.result }}
-        run: |
-          echo "build: $BUILD, metallib: $METALLIB, test: $TEST"
-          if [ "$BUILD" != success ] || [ "$METALLIB" != success ] || [ "$TEST" != success ]; then
-            echo "::error::A build or test job did not succeed."
-            exit 1
-          fi
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Select Xcode 27.2
-        uses: ./.github/actions/select-xcode
-
-      - name: Download the shard results
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: test-results-*
-          path: ${{ runner.temp }}/test-results
-
-      - name: Check that every test ran exactly once
-        run: |
-          python3 .github/scripts/test-shards.py verify --config .github/scripts/test-shards.json \
-            --results "$RUNNER_TEMP/test-results"
-
-      - name: Download the test products
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: test-products
-          path: ${{ runner.temp }}/test-products
-
-      - name: Report line coverage
-        # Counts the Swift sources under Source/MLX* only. The target is 80% line coverage. It is reported, not enforced.
-        env:
-          BIN: ${{ needs.build.outputs.bin }}
-        run: |
-          tar -xf "$RUNNER_TEMP/test-products/test-products.tar"
-          bin="$GITHUB_WORKSPACE/$BIN"
-          # SwiftBuild emits one bundle per test target; the native SwiftPM
-          # build system emits the combined package-test bundle.
-          binary="$bin/MLXTests.xctest/Contents/MacOS/MLXTests"
-          if [ ! -f "$binary" ]; then
-            binary="$bin/mlx-swiftPackageTests.xctest/Contents/MacOS/mlx-swiftPackageTests"
-          fi
-          # Merge the coverage profiles of all shards.
-          profiles=()
-          while IFS= read -r file; do
-            profiles+=("$file")
-          done < <(find "$RUNNER_TEMP/test-results" -name '*.profdata' | sort)
-          printf '%s\n' "${profiles[@]}"
-          if [ ! -f "$binary" ] || [ "${#profiles[@]}" -eq 0 ]; then
-            echo "::error::Missing test binary under $bin or coverage profiles under $RUNNER_TEMP/test-results."
-            exit 1
-          fi
-          profile="$RUNNER_TEMP/merged.profdata"
-          xcrun llvm-profdata merge -sparse "${profiles[@]}" -o "$profile"
-          # report FILE DIR... writes the llvm-cov report for the Swift files under the directories.
-          # llvm-cov ignores a path that does not exist and then reports every file, so the function checks each path first.
-          report() {
-            out=$1
-            shift
-            paths=()
-            for dir in "$@"; do
-              if [ ! -d "$GITHUB_WORKSPACE/$dir" ]; then
-                echo "::error::The directory $dir does not exist."
-                return 1
-              fi
-              paths+=("$GITHUB_WORKSPACE/$dir")
-            done
-            xcrun llvm-cov report "$binary" -instr-profile "$profile" \
-              -ignore-filename-regex '/Tests/|/\.build/' "${paths[@]}" > "$out"
-          }
-          # value_of FILE NAME prints the value of the column NAME in the TOTAL row, for example "Lines" (a count) or "Lines Cover" (a percentage).
-          # It finds the column by its name in the header row, and it fails when the value is missing.
-          value_of() {
-            awk -v want="$2" '
-              NR == 1 {
-                field = 1
-                for (i = 2; i <= NF; i++) {
-                  if ($i == "Missed") { missed = 1; continue }
-                  field++
-                  if (missed) { missed = 0; continue }
-                  if ($i == "Cover" || $i == "Executed") {
-                    if (group " Cover" == want) col = field
-                    continue
-                  }
-                  group = $i
-                  if (group == want) col = field
-                }
-              }
-              $1 == "TOTAL" && col { value = $col }
-              END {
-                if (want ~ / Cover$/ && value !~ /^[0-9.]+%$/) exit 1
-                if (want !~ / Cover$/ && value !~ /^[0-9]+$/) exit 1
-                print value
-              }
-            ' "$1" || { echo "::error::$1 has no $2 value in the TOTAL row." >&2; return 1; }
-          }
-          # row NAME FILE DIR... adds one table row.
-          row() {
-            name=$1
-            out=$2
-            shift 2
-            report "$out" "$@"
-            grep '^TOTAL' "$out"
-            lines=$(value_of "$out" "Lines Cover")
-            regions=$(value_of "$out" "Regions Cover")
-            functions=$(value_of "$out" "Functions Cover")
-            echo "| $name | $lines | $regions | $functions | 80% |" >> "$RUNNER_TEMP/coverage-rows.md"
-          }
-          : > "$RUNNER_TEMP/coverage-rows.md"
-          cd "$GITHUB_WORKSPACE"
-          sources=(Source/MLX*)
-          row "All of \`Source/MLX*\`" "$RUNNER_TEMP/coverage-report.txt" "${sources[@]}"
-          for target in MLX MLXNN MLXOptimizers; do
-            row "\`Source/$target\`" "$RUNNER_TEMP/coverage-$target.txt" "Source/$target"
-          done
-          lines_total=$(value_of "$RUNNER_TEMP/coverage-report.txt" Lines)
-          {
-            echo "### Line coverage"
-            echo
-            echo "| Component | Lines | Regions | Functions | Target |"
-            echo "|---|---|---|---|---|"
-            cat "$RUNNER_TEMP/coverage-rows.md"
-            echo
-            echo "The denominator is the host Swift code under \`Source/MLX*\` that the test binary links: $lines_total lines. It leaves out \`Tests/\` and the dependencies in \`.build/\`."
-            echo "The profile is the merge of the profiles of all shards: ${#profiles[@]} files."
-            echo "SwiftPM compiles the Cmlx C and C++ core without instrumentation, so it is not measured. The test bundle does not link MLXFast, MLXFFT, MLXLinalg and MLXRandom. These are deprecated shims that forward to APIs in \`Source/MLX\` (MLXFast.swift, FFT.swift, Linalg.swift, Random.swift), and those APIs are measured in the \`Source/MLX\` row. Metal shader code is outside every coverage tool."
-            echo "Swift emits no branch counters, so the Regions column is the proxy for branch coverage. The 80% target is reported only. The job does not fail below it."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: coverage-report
-          path: ${{ runner.temp }}/coverage-report.txt
-          retention-days: 7
-          overwrite: true
+          name: native-codeql-swift-canary
+          path: ${{ runner.temp }}/codeql-results/
+          if-no-files-found: error
+          retention-days: 3

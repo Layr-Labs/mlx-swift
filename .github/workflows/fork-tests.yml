@@ -37,17 +37,9 @@ defaults:
     shell: bash
 
 jobs:
-  plan-route:
-    uses: ./.github/workflows/darkbloom-route.yml
-    permissions: {}
-    with:
-      lanes: |
-        shard-plan linux_arm64 ubuntu-latest
-
   shards:
     name: Read the shard count
-    needs: plan-route
-    runs-on: ${{ fromJSON(needs.plan-route.outputs.routes)['shard-plan'] }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       shards: ${{ steps.plan.outputs.shards }}

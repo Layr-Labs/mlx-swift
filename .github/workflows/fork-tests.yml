@@ -62,6 +62,7 @@ jobs:
   # Every macOS job uses the same native runner class.
   build:
     name: Build the package and its tests
+    needs: shards
     runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
     timeout-minutes: 60
     outputs:
@@ -204,6 +205,7 @@ jobs:
 
   metallib:
     name: Build the full Metal library
+    needs: shards
     runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
     timeout-minutes: 60
     steps:

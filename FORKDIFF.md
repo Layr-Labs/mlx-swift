@@ -34,7 +34,9 @@ The `DARKBLOOM_ROUTING` variable controls the separate dynamic route workflow;
 it does not turn off these native-only jobs.
 
 The GitHub-hosted Pages job still packages and publishes the rendered artifact
-through its protected environment. The small shard-count job remains hosted.
+through its protected environment.
+If the first deploy fails before it creates a deployment (the packaged artifact
+is not listed yet), the job waits 20 seconds and tries once more. The small shard-count job remains hosted.
 The disabled native CodeQL workflow keeps its separate routing and activation
 rules.
 

@@ -10,6 +10,7 @@
 #include <Cmlx/mlx-backend-cuda-cuda.h>
 #include <Cmlx/mlx-backend-metal-metal.h>
 #include <Cmlx/mlx-compile.h>
+#include <Cmlx/mlx-config.h>
 #include <Cmlx/mlx-device.h>
 #include <Cmlx/mlx-distributed-distributed.h>
 #include <Cmlx/mlx-distributed-ops.h>
@@ -44,6 +45,7 @@
 #include <Cmlx/mlx-backend-metal-device.h>
 #include <Cmlx/mlx-backend-metal-resident.h>
 #include <Cmlx/mlx-backend-common-metal_kernel.h>
+#include <Cmlx/mlx-backend-common-process_allocation_cap.h>
 #include <Cmlx/mlx-backend-common-utils.h>
 #include <Cmlx/mlx-backend-cpu-encoder.h>
 #include <Cmlx/mlx-backend-gpu-eval.h>

@@ -60,8 +60,11 @@ def:
             1024-thread Metal groups without changing kernel math or dispatch geometry. The
             `mlx-c` pin has the upstream C API that upstream mlx-swift calls and the fork's
             own C API. The two-Mac cluster stack pins the cluster core and C with main
-            merged in: `mlx` 72dffa2d, the head of Layr-Labs/mlx#41 (with #35 and #33 under
-            it), and `mlx-c` 2ac897e3, the head of Layr-Labs/mlx-c#15.
+            merged in: `mlx` 47c5eb0e, the head of Layr-Labs/mlx#49 (the merge of upstream main
+            `1ba7f969` of 2026-10-30 into Layr-Labs/mlx `main`, which contains 72dffa2d, the
+            head of Layr-Labs/mlx#41 with #35 and #33 under it), and `mlx-c` ba493a03, the head
+            of Layr-Labs/mlx-c#20 (Layr-Labs/mlx-c#15 in `main`, with the SDPA call passing no
+            window to upstream's new `window_size` argument).
             Beyond main they order the fast-synch GPU wait after every pending pass and earlier
             kernels in its current concurrent pass, make a GPU stream wait for another GPU stream
             on a shared event instead of spinning, keep helper ops on the caller's stream,
@@ -102,7 +105,10 @@ def:
             needs a metallib built at Metal 3.2 or newer, such as the CMake full-AOT
             `mlx.metallib`. `tools/update-mlx-xcodeproj.sh` mirrors the Gemma 4 expert-QMM
             diagnostics header into `include-framework` and keeps its C-mode `MLX_API`
-            fallback.
+            fallback. It also mirrors `config.h` (upstream's `config::get`, which `utils.h`
+            includes since the 2026-10-30 core) and `backend/common/process_allocation_cap.h`
+            (which the core's `memory.h` includes), so no `include-framework` header names a
+            missing one.
           globs:
             - "Package.swift"
             - "xcode/**"

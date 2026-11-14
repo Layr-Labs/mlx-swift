@@ -1,11 +1,10 @@
 name: Fork Tests
 
-# Build the fork and run its tests with Xcode 27.2 on macOS runners: a Darkbloom Sandbox when the route job gets one,
-# otherwise the GitHub-hosted xcode-27 image.
+# Build the fork and run its tests with Xcode 27.2 on Darkbloom macOS runners.
+# The jobs wait for compatible capacity and have no hosted fallback.
 #
 # The jobs:
-#   shards         Reads the shard count, which the route job and the test matrix need.
-#   route          Asks Darkbloom for the runners of the macOS jobs (darkbloom-route.yml). They fall back to xcode-27.
+#   shards         Reads the shard count for the test matrix.
 #   build          Builds the package and its tests one time.
 #   metallib       Builds the full Metal library, or restores it from the cache. It runs at the same time as build.
 #   test           One job for each shard. Each shard lists the tests, plans the shards and runs its part of the tests.
@@ -52,27 +51,18 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Read the shard count
-        # The macOS jobs are build, metallib, build-and-test and one test job per shard. The route asks for that many.
+        # The macOS jobs are build, metallib, build-and-test and one test job per shard.
         id: plan
         run: |
           count=$(python3 -c 'import json; print(json.load(open(".github/scripts/test-shards.json"))["shards"])')
           echo "macos-jobs=$(( count + 3 ))" >> "$GITHUB_OUTPUT"
           echo "shards=$(python3 -c "import json; print(json.dumps(list(range(1, $count + 1))))")" >> "$GITHUB_OUTPUT"
 
-  # The test products hold the build's absolute workspace path and its Xcode, so the test jobs must run on the same
-  # kind of runner as the build. The macOS jobs therefore share one lane, which the plane grants whole or not at all.
-  route:
-    needs: shards
-    uses: ./.github/workflows/darkbloom-route.yml
-    permissions: {}
-    with:
-      lanes: |
-        fork-tests macos_arm64 xcode-27 ${{ needs.shards.outputs.macos-jobs }}
-
+  # The test products hold the build's absolute workspace path and its Xcode.
+  # Every macOS job uses the same native runner class.
   build:
     name: Build the package and its tests
-    needs: route
-    runs-on: ${{ fromJSON(needs.route.outputs.routes)['fork-tests'] }}
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
     timeout-minutes: 60
     outputs:
       bin: ${{ steps.pack.outputs.bin }}
@@ -214,8 +204,7 @@ jobs:
 
   metallib:
     name: Build the full Metal library
-    needs: route
-    runs-on: ${{ fromJSON(needs.route.outputs.routes)['fork-tests'] }}
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
     timeout-minutes: 60
     steps:
       # As in build: skip every cache step on a Darkbloom Sandbox that the plane gave no Darkbloom cache.
@@ -293,8 +282,8 @@ jobs:
 
   test:
     name: Test shard ${{ matrix.shard }}
-    needs: [shards, route, build, metallib]
-    runs-on: ${{ fromJSON(needs.route.outputs.routes)['fork-tests'] }}
+    needs: [shards, build, metallib]
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -468,9 +457,9 @@ jobs:
   build-and-test:
     # This job keeps the check name of the old single job.
     name: build-and-test
-    needs: [route, build, metallib, test]
+    needs: [build, metallib, test]
     if: ${{ !cancelled() }}
-    runs-on: ${{ fromJSON(needs.route.outputs.routes)['fork-tests'] }}
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
     timeout-minutes: 20
     steps:
       - name: Check the results of the other jobs

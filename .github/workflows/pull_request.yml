@@ -6,17 +6,8 @@ permissions:
   contents: read
 
 jobs:
-  # Asks Darkbloom for a macOS runner for the lint job (darkbloom-route.yml). The lane falls back to xcode-27.
-  route:
-    uses: ./.github/workflows/darkbloom-route.yml
-    permissions: {}
-    with:
-      lanes: |
-        lint macos_arm64 xcode-27
-
   lint:
-    needs: route
-    runs-on: ${{ fromJSON(needs.route.outputs.routes)['lint'] }}
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
     timeout-minutes: 15
     defaults:
       run:

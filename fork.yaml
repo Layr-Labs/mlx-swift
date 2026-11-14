@@ -392,7 +392,11 @@ def:
         The fork-diff check and Pages renderer use only native Linux ARM64 labels,
         waiting for compatible capacity. Their full check and render steps remain;
         the protected Pages publisher stays hosted. `FORKDIFF.md` documents the
-        qualification and watchdog bounds. Mac jobs keep their existing routing.
+        qualification and watchdog bounds. The six Mac build and test jobs and
+        pull-request lint job use only native macOS ARM64 labels with the approved
+        12-core, 32-GiB profile. Their steps, tests and timeouts stay unchanged.
+        A rerun keeps the native labels; there is no hosted fallback. The small
+        shard-count job remains hosted.
 
         The disabled native CodeQL workflow scans Actions, C/C++, JavaScript/TypeScript
         and Python with the pinned CodeQL 2.27.4 ARM64 bundle and their existing
@@ -405,6 +409,8 @@ def:
         - ".github/actionlint.yaml"
         - ".github/workflows/forkdiff-check.yml"
         - ".github/workflows/forkdiff-pages.yml"
+        - ".github/workflows/fork-tests.yml"
+        - ".github/workflows/pull_request.yml"
         - ".github/scripts/codeql_artifacts.py"
         - ".github/scripts/codeql_artifacts_test.py"
         - ".github/workflows/codeql-native.yml"

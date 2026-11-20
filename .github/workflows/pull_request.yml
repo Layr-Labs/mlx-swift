@@ -7,7 +7,7 @@ permissions:
 
 jobs:
   lint:
-    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64-4x16]
     timeout-minutes: 15
     defaults:
       run:
@@ -17,6 +17,11 @@ jobs:
         with:
           # Fetch the merge commit and its parents. The first parent is the base branch.
           fetch-depth: 2
+
+      - name: Start the resource sampler
+        # Report-only (.github/scripts/ci-resource-sampler.py): every 5 s it
+        # samples memory and busy vCPUs. It never fails the job.
+        run: python3 .github/scripts/ci-resource-sampler.py start "$RUNNER_TEMP/resource-samples"
 
       - name: Select Xcode 27.2
         uses: ./.github/actions/select-xcode
@@ -36,3 +41,8 @@ jobs:
             echo "::error::swift-format changed the files above. Run swift format format --in-place --configuration .swift-format on them and push the result."
             exit 1
           fi
+
+      - name: Report the resource samples
+        # Prints the peaks that size this job (FORKDIFF.md, Job sizes). Report-only.
+        if: ${{ always() }}
+        run: python3 .github/scripts/ci-resource-sampler.py report "$RUNNER_TEMP/resource-samples" || true

@@ -47,8 +47,15 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          sparse-checkout: .github/scripts/test-shards.json
+          # The shard count, and the workflows and scripts that the runner size test reads.
+          sparse-checkout: .github/
           sparse-checkout-cone-mode: false
+
+      - name: Test the runner sizes and the resource sampler
+        # Fails when a macOS job names no signed VM size (FORKDIFF.md, Job sizes).
+        run: |
+          python3 .github/scripts/test-runner-sizes.py
+          python3 .github/scripts/test-ci-resource-sampler.py
 
       - name: Read the shard count
         # The macOS jobs are build, metallib, build-and-test and one test job per shard.
@@ -63,7 +70,7 @@ jobs:
   build:
     name: Build the package and its tests
     needs: shards
-    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64-4x16]
     timeout-minutes: 60
     outputs:
       bin: ${{ steps.pack.outputs.bin }}
@@ -83,6 +90,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
+
+      - name: Start the resource sampler
+        # Report-only (.github/scripts/ci-resource-sampler.py): every 5 s it
+        # samples memory and busy vCPUs. It never fails the job.
+        run: python3 .github/scripts/ci-resource-sampler.py start "$RUNNER_TEMP/resource-samples"
 
       - name: Check generated quantized Metal sources
         run: |
@@ -203,10 +215,15 @@ jobs:
           retention-days: 1
           overwrite: true
 
+      - name: Report the resource samples
+        # Prints the peaks that size this job (FORKDIFF.md, Job sizes). Report-only.
+        if: ${{ always() }}
+        run: python3 .github/scripts/ci-resource-sampler.py report "$RUNNER_TEMP/resource-samples" || true
+
   metallib:
     name: Build the full Metal library
     needs: shards
-    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64-4x16]
     timeout-minutes: 60
     steps:
       # As in build: skip every cache step on a Darkbloom Sandbox that the plane gave no Darkbloom cache.
@@ -222,6 +239,11 @@ jobs:
           fi
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Start the resource sampler
+        # Report-only (.github/scripts/ci-resource-sampler.py): every 5 s it
+        # samples memory and busy vCPUs. It never fails the job.
+        run: python3 .github/scripts/ci-resource-sampler.py start "$RUNNER_TEMP/resource-samples"
 
       - name: Select Xcode 27.2
         id: xcode
@@ -282,10 +304,15 @@ jobs:
           retention-days: 1
           overwrite: true
 
+      - name: Report the resource samples
+        # Prints the peaks that size this job (FORKDIFF.md, Job sizes). Report-only.
+        if: ${{ always() }}
+        run: python3 .github/scripts/ci-resource-sampler.py report "$RUNNER_TEMP/resource-samples" || true
+
   test:
     name: Test shard ${{ matrix.shard }}
     needs: [shards, build, metallib]
-    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64-4x16]
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -298,6 +325,11 @@ jobs:
         with:
           # swift test reads the package manifest, and the Cmlx target lists files in the submodules.
           submodules: recursive
+
+      - name: Start the resource sampler
+        # Report-only (.github/scripts/ci-resource-sampler.py): every 5 s it
+        # samples memory and busy vCPUs. It never fails the job.
+        run: python3 .github/scripts/ci-resource-sampler.py start "$RUNNER_TEMP/resource-samples"
 
       - name: Select Xcode 27.2
         uses: ./.github/actions/select-xcode
@@ -456,12 +488,17 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      - name: Report the resource samples
+        # Prints the peaks that size this job (FORKDIFF.md, Job sizes). Report-only.
+        if: ${{ always() }}
+        run: python3 .github/scripts/ci-resource-sampler.py report "$RUNNER_TEMP/resource-samples" || true
+
   build-and-test:
     # This job keeps the check name of the old single job.
     name: build-and-test
     needs: [build, metallib, test]
     if: ${{ !cancelled() }}
-    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64]
+    runs-on: [self-hosted, macOS, ARM64, darkbloom-macos-arm64-4x16]
     timeout-minutes: 20
     steps:
       - name: Check the results of the other jobs
@@ -477,6 +514,11 @@ jobs:
           fi
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Start the resource sampler
+        # Report-only (.github/scripts/ci-resource-sampler.py): every 5 s it
+        # samples memory and busy vCPUs. It never fails the job.
+        run: python3 .github/scripts/ci-resource-sampler.py start "$RUNNER_TEMP/resource-samples"
 
       - name: Select Xcode 27.2
         uses: ./.github/actions/select-xcode
@@ -605,3 +647,8 @@ jobs:
           path: ${{ runner.temp }}/coverage-report.txt
           retention-days: 7
           overwrite: true
+
+      - name: Report the resource samples
+        # Prints the peaks that size this job (FORKDIFF.md, Job sizes). Report-only.
+        if: ${{ always() }}
+        run: python3 .github/scripts/ci-resource-sampler.py report "$RUNNER_TEMP/resource-samples" || true

@@ -22,8 +22,8 @@ as a run artifact, `forkdiff-page`) and exits with a notice instead of failing.
 
 The fork-diff check and page renderer use only Darkbloom Linux ARM64 runners.
 The six Mac build and test jobs and the pull-request lint job use only Darkbloom
-macOS ARM64 runners with the approved 12-core, 32-GiB profile. All keep their
-original steps, tests and job timeouts. When compatible
+macOS ARM64 runners. Each names its VM size ([Job sizes](#job-sizes)). All
+keep their original steps, tests and job timeouts. When compatible
 capacity is busy they wait; these jobs have no GitHub-hosted or Blacksmith
 fallback. The current profile qualification lifetime is one hour, and the
 existing watchdog can cancel or retry a job after its 30-minute wait threshold.
@@ -39,6 +39,35 @@ If the first deploy fails before it creates a deployment (the packaged artifact
 is not listed yet), the job waits 20 seconds and tries once more. The small shard-count job remains hosted.
 The disabled native CodeQL workflow keeps its separate routing and activation
 rules.
+
+### Job sizes
+
+Each Darkbloom macOS job names its VM size in its runner label, for example
+`darkbloom-macos-arm64-4x16` (4 vCPUs, 16 GiB). A job without a size gets the
+size that the approval pins (12 vCPUs, 32 GiB). The image pipeline signs
+4x16, 4x24, 8x16 and 12x32. A job gets the smallest signed size that has 30%
+headroom over its measured memory peak (used memory: app + wired +
+compressed). A job that took less than 10 minutes must stay under 10 minutes.
+
+All seven macOS jobs use 4x16. Each also passed on the hosted 3-vCPU, 7 GiB
+`xcode-27` Mac (runs 43531199569 and 43532260242).
+
+| Job | Size | 12 vCPUs (runs 43517961787 to 43543407019) | Hosted 3 vCPUs, 7 GiB |
+|---|---|---|---|
+| Build the package and its tests | 4x16 | 96 to 174 s | 167 to 263 s |
+| Build the full Metal library | 4x16 | 109 to 144 s | 35 to 41 s (cache hit) |
+| Test shard 1 to 3 | 4x16 | 97 to 302 s | 159 to 252 s |
+| build-and-test | 4x16 | 33 to 50 s | 33 to 37 s |
+| Lint (pull requests) | 4x16 | 25 to 26 s | - |
+
+Every macOS job runs `.github/scripts/ci-resource-sampler.py`, a copy of the
+sampler of Layr-Labs/d-inference, from its checkout on. Its last step,
+"Report the resource samples", prints the memory peak of each class, the
+three largest processes, the busy vCPUs and the sampled time scaled to 4 and
+8 vCPUs. Use these numbers to change a size. The shard-count job runs
+`.github/scripts/test-runner-sizes.py`. It fails when a macOS job names no
+size, a size that is not signed, or a size other than the one its table
+gives.
 
 ## The gate
 

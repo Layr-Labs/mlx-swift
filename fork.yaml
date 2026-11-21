@@ -75,7 +75,9 @@ def:
             flag across wires and does the mesh `all_gather` offsets in 64 bits. The
             page-backed footprint change is
             reverted, as on the single-Mac stack, and the thread-scoped command-buffer
-            commit limits come from main.
+            commit limits come from main. The prefill-row invariance scope moves `mlx` to the
+            head of Layr-Labs/mlx `perf/prefill-row-invariance`, one commit on 72dffa2d, and
+            keeps `mlx-c` 2ac897e3.
           globs:
             - ".gitmodules"
             - "Source/Cmlx/mlx"
@@ -337,6 +339,23 @@ def:
           globs:
             - "Source/MLX/GPU+Metal.swift"
             - "Source/Cmlx/include/mlx/command_buffer_limits.h"
+        - title: "GPU: prefill-row invariance scope"
+          description: |
+            `GPU.withPrefillRowInvariance(rows:_:)` and `GPU.prefillRowInvarianceRows` wrap the
+            core's `mlx_metal_set_thread_prefill_rows` and `mlx_metal_thread_prefill_rows`
+            (header `Source/Cmlx/include/mlx/command_buffer_limits.h`). Quantized matmuls and
+            attention ops built on the calling thread inside the scope keep its reference rows:
+            on the GPU a quantized `x @ w.T` of two or more rows splits K as a product of that
+            many rows would, so each row of a prompt chunk has the same bits whatever the chunk's
+            length, and head-dim 256 causal or masked attention takes the fused NAX kernel from
+            16 queries instead of 1024. Ops built outside the scope are unchanged.
+            `PrefillRowInvarianceTests` checks the scope's nesting, restore and thread rules,
+            that short products in the scope equal the same rows of a 4096-row product, and that
+            ops keep the rows of the thread that built them.
+          globs:
+            - "Source/MLX/GPU+Metal.swift"
+            - "Source/Cmlx/include/mlx/command_buffer_limits.h"
+            - "Tests/MLXTests/PrefillRowInvarianceTests.swift"
     - title: "Tests"
       description: |
         Coverage for the new Swift surface and for the forked kernels as reached from Swift:

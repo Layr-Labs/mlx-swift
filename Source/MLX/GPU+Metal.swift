@@ -422,4 +422,34 @@ extension GPU {
         defer { mlx_metal_set_thread_qmm_steel_tile(previous, nil) }
         return try body()
     }
+
+    /// Runs `body` with `rows` as this thread's prefill reference rows, then
+    /// restores the thread's previous value. Quantized matmuls and attention
+    /// ops keep the value of the thread that builds them (when `body` creates
+    /// the arrays, not when they are evaluated), so a graph built in `body`
+    /// keeps its routes when it is evaluated later or on another thread.
+    ///
+    /// On the GPU, a quantized `x @ w.T` of two or more rows built in the
+    /// scope splits K as a product of `rows` rows would, and skips the NAX
+    /// split-K kernel, so each row has the same bits whatever the number of
+    /// rows in the call; head-dim 256 causal or masked attention takes the
+    /// fused NAX kernel from 16 queries instead of 1024. A one-row product
+    /// keeps the vector kernel, and attention of 8 or fewer queries keeps the
+    /// vector kernels. `rows` of 0 or less ends the scope inside `body`; ops
+    /// built outside a scope take the routes they took before. Compiled
+    /// functions trace again inside a scope.
+    public static func withPrefillRowInvariance<R>(
+        rows: Int, _ body: () throws -> R
+    ) rethrows -> R {
+        var previous: Int32 = 0
+        mlx_metal_set_thread_prefill_rows(Int32(clamping: max(0, rows)), &previous)
+        defer { mlx_metal_set_thread_prefill_rows(previous, nil) }
+        return try body()
+    }
+
+    /// This thread's prefill reference rows: 0 outside a
+    /// ``withPrefillRowInvariance(rows:_:)`` scope.
+    public static var prefillRowInvarianceRows: Int {
+        Int(mlx_metal_thread_prefill_rows())
+    }
 }

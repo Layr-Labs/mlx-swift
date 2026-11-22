@@ -430,8 +430,9 @@ open class QuantizedLinear: Linear, Quantized {
                 : offsets
         }
         let outputShape = Array(x.shape.dropLast()) + [weight.dim(0)]
-        // Only the signed-Hadamard FP32 contract and `independentRowsForward`
-        // opt into this branch. A leading weight dimension keeps every row at M=1, avoiding the
+        // Only `HadamardQuantizedLinear(independentRows: true)` and
+        // `independentRowsForward` opt into this branch. A leading weight
+        // dimension keeps every row at M=1, avoiding the
         // architecture-dependent TF32 matrix path without unpacking weights.
         // Ordinary quantized callers preserve their existing operator below.
         var output: MLXArray

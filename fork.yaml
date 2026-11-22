@@ -257,11 +257,17 @@ def:
             intermediates and restore the incoming dtype; explicit signs and
             packed geometry are validated without unfolding or requantizing.
             For FP32 input of more than one row, the 2-bit/group128/block1024
-            profile with FP16 scales sends each row through the single-row (M=1)
-            quantized kernel, so a multi-row call gives the bytes of separate
-            singleton calls and does not use the architecture-dependent TF32
-            matrix kernel. `DARKBLOOM_BONSAI_F16_CONSTANT_CACHE` does not change
-            this. `HadamardLayerTests` compares it with separate singleton calls.
+            profile with FP16 scales takes one batched packed matmul by default
+            (TF32 on M5, FP32 elsewhere): prompt speed, not the bytes of
+            singleton calls. A layer built with `independentRows: true` (the
+            stages of a pair, whose machines must agree byte for byte) instead
+            sends each row through the single-row (M=1) quantized kernel, so a
+            multi-row call gives the bytes of separate singleton calls and does
+            not use the architecture-dependent TF32 matrix kernel. Other profiles
+            and singleton calls are the same either way.
+            `DARKBLOOM_BONSAI_F16_CONSTANT_CACHE` does not change which kernel
+            runs. `HadamardLayerTests` compares the default with one batched
+            `quantizedMM` and `independentRows` with separate singleton calls.
             Adapted from PrismML-Eng/mlx-swift under its MIT attribution.
           globs:
             - "Source/MLXNN/Hadamard.swift"

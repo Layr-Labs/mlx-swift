@@ -79,8 +79,7 @@ struct fp8_e4m3 {
     uint32_t sign = f_bits & 0x80000000;
     f_bits ^= sign;
     if (f_bits >= fp8_max) {
-      // Default behavior saturates to min/max
-      bits = 0x7E;
+      bits = (f_bits > 0x7F800000) ? 0x7F : 0x7E;
     } else {
       if (f_bits < (121 << 23)) {
         f_bits = as_type<uint32_t>(
@@ -135,12 +134,16 @@ struct fp8_e8m0 {
   }
 
   operator bfloat16_t() thread {
-    uint16_t out = (bits == 0 ? 0x40 : (static_cast<uint16_t>(bits) << 7));
+    uint16_t out = (bits == 0)
+        ? 0x40
+        : (bits == 0xFF ? 0x7FC0 : (static_cast<uint16_t>(bits) << 7));
     return as_type<bfloat16_t>(out);
   }
 
   operator float() thread {
-    uint32_t out = (bits == 0 ? 0x400000 : (static_cast<uint16_t>(bits) << 23));
+    uint32_t out = (bits == 0)
+        ? 0x400000
+        : (bits == 0xFF ? 0x7FC00000 : (static_cast<uint16_t>(bits) << 23));
     return as_type<float>(out);
   }
 
@@ -362,15 +365,15 @@ using namespace mlx::steel;
 
 template <
     typename T,
-    const int group_size,
-    const int bits,
-    const bool aligned_N,
-    const bool has_global_scale = false,
-    const int BM = 64,
-    const int BK = 64,
-    const int BN = 64,
-    const int WM = 2,
-    const int WN = 2,
+    int group_size,
+    int bits,
+    bool has_global_scale,
+    bool aligned_N,
+    int BM = 64,
+    int BK = 64,
+    int BN = 64,
+    int WM = 2,
+    int WN = 2,
     typename Wtype = bfloat>
 METAL_FUNC void fp_qmm_t_impl(
     const device uint32_t* w,
@@ -541,14 +544,14 @@ METAL_FUNC vec<Wtype, 4> dequantize_fp_x4(uint q, uint8_t s) {
 
 template <
     typename T,
-    const int group_size,
-    const int bits,
-    const bool has_global_scale = false,
-    const int BM = 64,
-    const int BK = 64,
-    const int BN = 64,
-    const int WM = 2,
-    const int WN = 2,
+    int group_size,
+    int bits,
+    bool has_global_scale = false,
+    int BM = 64,
+    int BK = 64,
+    int BN = 64,
+    int WM = 2,
+    int WN = 2,
     typename Wtype = bfloat>
 METAL_FUNC void fp_qmm_n_impl(
     const device uint32_t* w,
@@ -754,16 +757,16 @@ METAL_FUNC void adjust_matrix_offsets(
 
 template <
     typename T,
-    const int group_size,
-    const int bits,
-    const bool aligned_N,
-    const bool batched,
-    const int BM = 64,
-    const int BK = 64,
-    const int BN = 64,
-    const int WM = 2,
-    const int WN = 2,
-    const bool has_global_scale = false,
+    int group_size,
+    int bits,
+    bool has_global_scale,
+    bool aligned_N,
+    bool batched,
+    int BM = 64,
+    int BK = 64,
+    int BN = 64,
+    int WM = 2,
+    int WN = 2,
     typename Wtype = bfloat>
 [[kernel]] void fp_qmm_t_nax(
     const device uint32_t* w,
@@ -811,8 +814,8 @@ template <
       T,
       group_size,
       bits,
-      aligned_N,
       has_global_scale,
+      aligned_N,
       BM,
       BK,
       BN,
@@ -824,14 +827,16 @@ template <
 
 template <
     typename T,
-    const int group_size,
-    const int bits,
-    const bool batched,
-    const int BM = 64,
-    const int BK = 64,
-    const int BN = 64,
-    const int WM = 2,
-    const int WN = 2,
+    int group_size,
+    int bits,
+    bool has_global_scale, // unimplemented
+    bool aligned_N, // unused
+    bool batched,
+    int BM = 64,
+    int BK = 64,
+    int BN = 64,
+    int WM = 2,
+    int WN = 2,
     typename Wtype = bfloat>
 [[kernel]] void fp_qmm_n_nax(
     const device uint32_t* w,
@@ -883,15 +888,16 @@ template <
 
 template <
     typename T,
-    const int group_size,
-    const int bits,
-    const bool aligned_N,
-    const int BM = 64,
-    const int BK = 64,
-    const int BN = 64,
-    const int WM = 2,
-    const int WN = 2,
-    const bool has_global_scale = false,
+    int group_size,
+    int bits,
+    bool has_global_scale,
+    bool aligned_N,
+    bool batched, // unused
+    int BM = 64,
+    int BK = 64,
+    int BN = 64,
+    int WM = 2,
+    int WN = 2,
     typename Wtype = bfloat>
 [[kernel]] void fp_gather_qmm_t_nax(
     const device uint32_t* w,
@@ -950,8 +956,8 @@ template <
       T,
       group_size,
       bits,
-      aligned_N,
       has_global_scale,
+      aligned_N,
       BM,
       BK,
       BN,
@@ -963,14 +969,16 @@ template <
 
 template <
     typename T,
-    const int group_size,
-    const int bits,
-    const int BM = 64,
-    const int BK = 64,
-    const int BN = 64,
-    const int WM = 2,
-    const int WN = 2,
-    const bool has_global_scale = false,
+    int group_size,
+    int bits,
+    bool has_global_scale, // unimplemented
+    bool aligned_N, // unused
+    bool batched, // unused
+    int BM = 64,
+    int BK = 64,
+    int BN = 64,
+    int WM = 2,
+    int WN = 2,
     typename Wtype = bfloat>
 [[kernel]] void fp_gather_qmm_n_nax(
     const device uint32_t* w,
@@ -1034,14 +1042,14 @@ template <
 template <
     typename T,
     int group_size,
-    const int bits,
+    int bits,
+    bool has_global_scale, // unimplemented
+    bool transpose,
     int BM,
     int BN,
     int BK,
     int WM,
     int WN,
-    bool transpose,
-    bool has_global_scale = false,
     typename Wtype = bfloat>
 [[kernel]] void fp_gather_qmm_rhs_nax(
     const device T* x,
